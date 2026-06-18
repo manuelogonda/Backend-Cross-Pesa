@@ -1,3 +1,50 @@
+server:
+  port: 8080
+
 spring:
   application:
     name: cross-pesa
+
+  # 1. Database Connection Configuration
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cross_pesa_db
+    username: cross_pesa_dev
+    password: cross896
+
+    # 2. HikariCP Connection Pool Optimization (Belongs inside datasource)
+    hikari:
+      pool-name: CrossPesaCP
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+      max-lifetime: 1800000
+
+  # 3. SQL Schema Initialization Controls (Belongs directly under spring)
+  sql:
+    init:
+      mode: always
+      platform: postgres
+
+  # 4. JPA Configuration
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+  web:
+    error:
+      include-message: always
+
+  docker:
+    compose:
+      enabled: false
+
+    security:
+      jwt:
+        # This is a cryptographically secure, Base64-encoded 256-bit secret key
+        secret-key: t2mfb2iBt43eYfYOMmEIBsFgR3oNGoEpKAru4FzFB+8=
+        # Token lifetime setup: 86400000 milliseconds = 24 Hours
+        expiration: 86400000
