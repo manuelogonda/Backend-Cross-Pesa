@@ -6,9 +6,9 @@ import com.manuelorg.cross_pesa.features.auth.dto.LoginRequest;
 import com.manuelorg.cross_pesa.features.auth.dto.RegisterRequest;
 import com.manuelorg.cross_pesa.features.user.User;
 import com.manuelorg.cross_pesa.features.user.UserRepository;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -23,8 +23,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
-    private final UserDetailsService userDetailsService; // Spring will automatically inject your CustomUserDetailsService
-
+    private final UserDetailsService userDetailsService;
     @Transactional
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {

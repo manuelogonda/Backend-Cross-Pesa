@@ -11,16 +11,16 @@ spring:
     username: cross_pesa_dev
     password: cross896
 
-    # 2. HikariCP Connection Pool Optimization (Belongs inside datasource)
+    # 2. HikariCP Connection Pool Optimization
     hikari:
       pool-name: CrossPesaCP
       maximum-pool-size: 10
       minimum-idle: 5
       idle-timeout: 300000
-      connection-timeout: 20000
+      connection-timeout: 2000
       max-lifetime: 1800000
 
-  # 3. SQL Schema Initialization Controls (Belongs directly under spring)
+  # 3. SQL Schema Initialization Controls
   sql:
     init:
       mode: always
@@ -34,6 +34,7 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+
   web:
     error:
       include-message: always
@@ -42,9 +43,11 @@ spring:
     compose:
       enabled: false
 
-    security:
-      jwt:
-        # This is a cryptographically secure, Base64-encoded 256-bit secret key
-        secret-key: t2mfb2iBt43eYfYOMmEIBsFgR3oNGoEpKAru4FzFB+8=
-        # Token lifetime setup: 86400000 milliseconds = 24 Hours
-        expiration: 86400000
+# 5. Custom App Security Configuration (Top-level root block)
+application:
+  security:
+    jwt:
+      # This is a cryptographically secure, Base64-encoded 256-bit secret key
+      secret-key: t2mfb2iBt43eYfYOMmEIBsFgR3oNGoEpKAru4FzFB+8=
+      # Token lifetime setup: 86400000 milliseconds = 24 Hours
+      expiration: 86400000
