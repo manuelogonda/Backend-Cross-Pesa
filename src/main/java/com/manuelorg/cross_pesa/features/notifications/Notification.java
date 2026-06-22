@@ -4,16 +4,22 @@ import com.manuelorg.cross_pesa.features.notifications.enums.NotificationStatus;
 import com.manuelorg.cross_pesa.features.notifications.enums.NotificationType;
 import com.manuelorg.cross_pesa.features.user.User;
 import jakarta.persistence.*;
-import lombok.Builder;
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Builder
+@Entity
+@Getter
+@Setter
+@Table(name = "notifications")
+@NoArgsConstructor
+@AllArgsConstructor
 public class Notification {
     @Id
-    @GeneratedValue
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 

@@ -1,11 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
-    <data-source source="LOCAL" name="cross_pesa_db@localhost" uuid="767f2e75-d74b-451b-b241-b8f26796f5ee">
+    <data-source source="LOCAL" name="cross_pesa_db@localhost [2]" uuid="1114a4e4-428f-4005-8295-0ddebf22f016">
       <driver-ref>postgresql</driver-ref>
       <synchronize>true</synchronize>
-      <imported>true</imported>
-      <remarks>$PROJECT_DIR$/src/main/resources/application.yaml</remarks>
       <jdbc-driver>org.postgresql.Driver</jdbc-driver>
       <jdbc-url>jdbc:postgresql://localhost:5432/cross_pesa_db</jdbc-url>
       <jdbc-additional-properties>

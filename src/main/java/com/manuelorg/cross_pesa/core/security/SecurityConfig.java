@@ -29,13 +29,13 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 1. Disable CSRF protection since REST APIs don't use session cookies (protects against stateless exploits)
-                .csrf(AbstractHttpConfigurer::disable)
+                // 1. Disable CSRF stateless jwts apis dont need it
+                .csrf(csrf -> csrf.disable())
 
                 // 2. Open up authentication paths, but lock down all other operational paths
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/auth/**").permitAll() // Public paths
-                        .anyRequest().authenticated()                  // Everything else requires a valid token
+                        .anyRequest().authenticated() // Everything else requires a valid token
                 )
 
                 // 3. Enforce stateless session management. Spring won't save session state on the server side
