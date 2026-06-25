@@ -5,7 +5,7 @@ import com.manuelorg.cross_pesa.notification.enums.NotificationStatus;
 import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import jakarta.persistence.*;
 import lombok.*;
-import org.apache.catalina.User;
+import com.manuelorg.cross_pesa.user.User;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.OffsetDateTime;

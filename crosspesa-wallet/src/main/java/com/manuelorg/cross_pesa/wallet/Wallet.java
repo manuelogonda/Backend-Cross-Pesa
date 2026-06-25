@@ -2,7 +2,7 @@ package com.manuelorg.cross_pesa.wallet;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.apache.catalina.User;
+import com.manuelorg.cross_pesa.user.User;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -50,6 +50,11 @@ public class Wallet {
     // ISO 4217 Currency Code (e.g., "KES", "USD", "EUR")
     @Column(name = "currency", nullable = false, length = 3)
     private String currency;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    @Builder.Default
+    private WalletStatus status = WalletStatus.ACTIVE;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

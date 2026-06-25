@@ -4,7 +4,6 @@ server:
 spring:
   application:
     name: cross-pesa
-
   # 1. Database Connection Configuration
   datasource:
     url: jdbc:postgresql://localhost:5432/cross_pesa_db
@@ -51,3 +50,10 @@ application:
       secret-key: t2mfb2iBt43eYfYOMmEIBsFgR3oNGoEpKAru4FzFB+8=
       # Token lifetime setup: 86400000 milliseconds = 24 Hours
       expiration: 86400000
+
+app:
+  exchange-rate:
+    app-id: "${OPEN_EXCHANGE_APP_ID:c1463654546849afbfde0c81c7741414}"
+    base-url: https://openexchangerates.org/api/
+
+

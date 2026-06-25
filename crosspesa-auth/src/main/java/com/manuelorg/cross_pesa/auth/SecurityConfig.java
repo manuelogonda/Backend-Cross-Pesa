@@ -36,12 +36,14 @@ public class SecurityConfig {
                 // 1. Explicitly enable CORS and pass our custom rules configuration
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
 
-                // 2. Disable CSRF stateless jwts apis dont need it
+                // 2. Disable CSRF stateless jwts api
                 .csrf(AbstractHttpConfigurer::disable)
 
                 // 3. Open up authentication paths, but lock down all other operational paths
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**").permitAll() // Public paths
+                        .requestMatchers("/api/v1/auth/**").permitAll()
+                        .requestMatchers("/api/v1/rates/**").permitAll()// Public paths
+                        .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated() // Everything else requires a valid token
                 )
 
