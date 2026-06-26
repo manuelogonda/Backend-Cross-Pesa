@@ -30,7 +30,7 @@ spring:
   jpa:
     show-sql: true
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -41,7 +41,7 @@ spring:
 
   docker:
     compose:
-      enabled: false
+      enabled: true
 
 # 5. Custom App Security Configuration (Top-level root block)
 application:
@@ -51,3 +51,7 @@ application:
       secret-key: t2mfb2iBt43eYfYOMmEIBsFgR3oNGoEpKAru4FzFB+8=
       # Token lifetime setup: 86400000 milliseconds = 24 Hours
       expiration: 86400000
+flyway:
+  enabled: true
+  locations: classpath:db/migration
+  baseline-on-migrate: true
