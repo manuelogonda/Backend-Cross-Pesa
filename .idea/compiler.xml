@@ -14,6 +14,16 @@
         <module name="cross-pesa" />
       </profile>
     </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="crosspesa-api" target="21" />
+      <module name="crosspesa-auth" target="21" />
+      <module name="crosspesa-events" target="21" />
+      <module name="crosspesa-notification" target="21" />
+      <module name="crosspesa-rates" target="21" />
+      <module name="crosspesa-shared" target="21" />
+      <module name="crosspesa-transfer" target="21" />
+      <module name="crosspesa-wallet" target="21" />
+    </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
