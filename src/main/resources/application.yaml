@@ -7,7 +7,7 @@ spring:
 
   # 1. Database Connection Configuration
   datasource:
-    url: jdbc:postgresql://localhost:5432/cross_pesa_db
+    url: jdbc:postgresql://localhost:5432/crosspesa_db_dev
     username: cross_pesa_dev
     password: cross896
 
@@ -30,7 +30,7 @@ spring:
   jpa:
     show-sql: true
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -51,3 +51,8 @@ application:
       secret-key: t2mfb2iBt43eYfYOMmEIBsFgR3oNGoEpKAru4FzFB+8=
       # Token lifetime setup: 86400000 milliseconds = 24 Hours
       expiration: 86400000
+
+flyway:
+  enabled: true
+  baseline-on-migrate: true
+  locations: classpath:db/migration
