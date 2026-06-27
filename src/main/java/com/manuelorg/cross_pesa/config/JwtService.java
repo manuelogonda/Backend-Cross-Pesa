@@ -5,6 +5,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
@@ -14,23 +15,39 @@ import java.util.function.Function;
 
 @Service
 public class JwtService {
+    @Value("${application.security.jwt.secret-key}")
+    private String secretKey;
 
-    // For the MVP, this is hardcoded. In production, move this to application.yml and inject via @Value
-    private static final String SECRET_KEY = "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970";
-    private static final long JWT_EXPIRATION_TIME = 86400000; // 24 Hours in milliseconds
+    @Value("${application.security.jwt.access-token-expiration}")
+    private long accessTokenExpiration;
 
+    @Value("${application.security.jwt.refresh-token-expiration}")
+    private long refreshTokenExpiration;
+
+    // --- Access Token Generation ---
     public String generateToken(User user) {
-        return Jwts.
-                builder()
+        return Jwts.builder()
                 .subject(user.getEmail())
                 .claim("userId", user.getId().toString())
                 .claim("role", user.getRole().name())
                 .issuedAt(new Date(System.currentTimeMillis()))
-                .expiration(new Date(System.currentTimeMillis() + JWT_EXPIRATION_TIME))
+                .expiration(new Date(System.currentTimeMillis() + accessTokenExpiration))
                 .signWith(getSignInKey())
                 .compact();
     }
 
+    // --- Refresh Token Generation ---
+    // Notice how we use the modern .subject() instead of the deprecated .setSubject()
+    public String generateRefreshToken(UserDetails userDetails) {
+        return Jwts.builder()
+                .subject(userDetails.getUsername())
+                .issuedAt(new Date(System.currentTimeMillis()))
+                .expiration(new Date(System.currentTimeMillis() + refreshTokenExpiration))
+                .signWith(getSignInKey()) // v0.12.x automatically infers the HS256 algorithm from the key size
+                .compact();
+    }
+
+    // --- Validation & Extraction Logic ---
     public boolean isTokenValid(String token, UserDetails userDetails) {
         final String username = extractUsername(token);
         return (username.equals(userDetails.getUsername())) && !isTokenExpired(token);
@@ -62,7 +79,7 @@ public class JwtService {
     }
 
     private SecretKey getSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(SECRET_KEY);
+        byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         return Keys.hmacShaKeyFor(keyBytes);
     }
 }

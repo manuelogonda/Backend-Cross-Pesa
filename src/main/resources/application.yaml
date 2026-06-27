@@ -50,7 +50,8 @@ application:
       # This is a cryptographically secure, Base64-encoded 256-bit secret key
       secret-key: t2mfb2iBt43eYfYOMmEIBsFgR3oNGoEpKAru4FzFB+8=
       # Token lifetime setup: 86400000 milliseconds = 24 Hours
-      expiration: 86400000
+      access-token-expiration: 86400000
+      refresh-token-expiration: 604800000
 
 flyway:
   enabled: true
