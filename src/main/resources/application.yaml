@@ -4,12 +4,25 @@ server:
 spring:
   application:
     name: cross-pesa
+  config:
+    import: optional:file:.env
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope:
+              - email
+              - profile
+
 
   # 1. Database Connection Configuration
   datasource:
-    url: jdbc:postgresql://localhost:5432/crosspesa
-    username: cross_pesa_dev
-    password: cross896
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
 
     # 2. HikariCP Connection Pool Optimization
     hikari:
@@ -23,8 +36,9 @@ spring:
   # 3. SQL Schema Initialization Controls
   sql:
     init:
-      mode: always
+      mode: never
       platform: postgres
+      separator: "^^"
 
   # 4. JPA Configuration
   jpa:
@@ -48,12 +62,24 @@ application:
   security:
     jwt:
       # This is a cryptographically secure, Base64-encoded 256-bit secret key
-      secret-key: t2mfb2iBt43eYfYOMmEIBsFgR3oNGoEpKAru4FzFB+8=
+      secret-key: ${JWT_SECRET}
       # Token lifetime setup: 86400000 milliseconds = 24 Hours
-      access-token-expiration: 86400000
-      refresh-token-expiration: 604800000
+      access-token-expiration: ${JWT_EXPIRATION}
+      refresh-token-expiration: ${JWT_REFRESH_EXPIRATION}
 
 #flyway:
 #  enabled: false
 #  baseline-on-migrate: false
 #  locations: classpath:db/migration
+cross-pesa:
+  fx:
+    oer:
+      app-id: ${OER_APP_ID}
+
+africastalking:
+  username: ${AT_USERNAME:sandbox}
+  api-key: ${AT_API_KEY}
+
+sendgrid:
+  api-key: ${SENDGRID_API_KEY}
+  from-email: ${SENDGRID_FROM_EMAIL}

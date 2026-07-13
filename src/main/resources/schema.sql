@@ -7,8 +7,8 @@ $$
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
     RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+END
+$$ LANGUAGE plpgsql^^
 
 -- 1. USERS
 CREATE TABLE IF NOT EXISTS users (
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
 
     email_verified BOOLEAN  NOT NULL DEFAULT FALSE,
 
-    password_hash  VARCHAR(255) NOT NULL,
+    password_hash  VARCHAR(255),
 
     first_name  VARCHAR(100)  NOT NULL,
 
@@ -43,12 +43,12 @@ CREATE TABLE IF NOT EXISTS users (
                                         'SO'
             )),
 
-    date_of_birth        DATE                NOT NULL,
+    date_of_birth        DATE              ,
 
-    id_type              VARCHAR(50)         NOT NULL DEFAULT 'NATIONAL_ID'
+    id_type              VARCHAR(50)    DEFAULT 'NATIONAL_ID'
         CHECK (id_type IN ('NATIONAL_ID', 'PASSPORT')),
 
-    id_number            VARCHAR(100) UNIQUE NOT NULL,
+    id_number            VARCHAR(100) UNIQUE ,
 
     role                 VARCHAR(20)         NOT NULL DEFAULT 'USER'
         CHECK (role IN ('USER', 'MERCHANT', 'ADMIN')),
@@ -67,13 +67,13 @@ CREATE TABLE IF NOT EXISTS users (
 
     updated_at           TIMESTAMPTZ         NOT NULL
                                                       DEFAULT CURRENT_TIMESTAMP
-);
+)^^
 
 CREATE TRIGGER update_users_modtime
     BEFORE UPDATE
     ON users
     FOR EACH ROW
-EXECUTE FUNCTION update_modified_column();
+EXECUTE FUNCTION update_modified_column()^^
 
 
 -- 2. The Beneficiaries Table
@@ -116,13 +116,13 @@ CREATE TABLE beneficiaries
 
     CONSTRAINT uk_user_beneficiary_routing
         UNIQUE (user_id, payout_provider, account_number)
-);
+)^^
 
 CREATE TRIGGER trigger_update_beneficiaries_timestamp
     BEFORE UPDATE
     ON beneficiaries
     FOR EACH ROW
-EXECUTE FUNCTION update_modified_column();
+EXECUTE FUNCTION update_modified_column()^^
 
 
 -- 3. WALLETS
@@ -157,13 +157,13 @@ CREATE TABLE IF NOT EXISTS wallets
     CONSTRAINT uq_user_currency UNIQUE (user_id, currency),
 
     CONSTRAINT check_valid_reservation CHECK (balance >= locked_balance)
-);
+)^^
 
 CREATE TRIGGER update_wallets_modtime
     BEFORE UPDATE
     ON wallets
     FOR EACH ROW
-EXECUTE FUNCTION update_modified_column();
+EXECUTE FUNCTION update_modified_column()^^
 
 -- 4. TRANSACTIONS
 CREATE TABLE IF NOT EXISTS transactions
@@ -173,13 +173,13 @@ CREATE TABLE IF NOT EXISTS transactions
     sender_id             UUID                NOT NULL
         REFERENCES users (id) ON DELETE RESTRICT,
 
-    beneficiary_id        UUID                NOT NULL
+    beneficiary_id        UUID              NULL
         REFERENCES beneficiaries (id) ON DELETE RESTRICT,
 
     source_wallet_id      UUID                NOT NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
-    destination_wallet_id UUID                NOT NULL
+    destination_wallet_id UUID           NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
     source_currency       VARCHAR(3)          NOT NULL,
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS transactions
         CHECK (destination_amount > 0.000000),
 
     transfer_fee          NUMERIC(18, 4)
-        CHECK (transfer_fee > 0.000000),
+        CHECK (transfer_fee >= 0.000000),
 
     fx_rate_applied       NUMERIC(18, 6)      NOT NULL
         CHECK (fx_rate_applied > 0.000000),
@@ -217,13 +217,13 @@ CREATE TABLE IF NOT EXISTS transactions
     updated_at            TIMESTAMPTZ         NOT NULL
                                                        DEFAULT CURRENT_TIMESTAMP
 
-);
+)^^
 
 CREATE TRIGGER update_transactions_modtime
     BEFORE UPDATE
     ON transactions
     FOR EACH ROW
-EXECUTE FUNCTION update_modified_column();
+EXECUTE FUNCTION update_modified_column()^^
 
 -- 5 LEDGER ENTRIES
 CREATE TABLE IF NOT EXISTS ledger_entries
@@ -253,7 +253,7 @@ CREATE TABLE IF NOT EXISTS ledger_entries
 
     updated_at     TIMESTAMPTZ    NOT NULL
                                     DEFAULT CURRENT_TIMESTAMP
-);
+)^^
 
 CREATE OR REPLACE FUNCTION process_ledger_entry_and_sync_wallet()
     RETURNS TRIGGER AS
@@ -268,7 +268,6 @@ BEGIN
     FROM wallets
     WHERE id = NEW.wallet_id
         FOR UPDATE;
-
     -- 2. Calculate the new balance based on the entry type
     IF NEW.entry_type = 'DEBIT' THEN
         -- Defensive check: Prevent overdrafts at the ledger level
@@ -294,15 +293,15 @@ BEGIN
     -- 4. The trigger returns the modified NEW row, which now perfectly contains
     -- the calculated balance_after, allowing the INSERT to finally complete.
     RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+END
+$$ LANGUAGE plpgsql^^
 
 -- Attach the sync engine to execute BEFORE the ledger insert finishes
 CREATE TRIGGER trigger_process_ledger_entry
     BEFORE INSERT
     ON ledger_entries
     FOR EACH ROW
-EXECUTE FUNCTION process_ledger_entry_and_sync_wallet();
+EXECUTE FUNCTION process_ledger_entry_and_sync_wallet()^^
 
 -- Block Updates and Deletes explicitly at the Database Level
 CREATE OR REPLACE FUNCTION block_immutable_ledger_changes()
@@ -317,13 +316,13 @@ CREATE TRIGGER trigger_protect_ledger_updates
     BEFORE UPDATE OR DELETE
     ON ledger_entries
     FOR EACH ROW
-EXECUTE FUNCTION block_immutable_ledger_changes();
+EXECUTE FUNCTION block_immutable_ledger_changes()^^
 
 CREATE TRIGGER update_transactions_modtime
     BEFORE UPDATE
     ON ledger_entries
     FOR EACH ROW
-EXECUTE FUNCTION update_modified_column();
+EXECUTE FUNCTION update_modified_column()^^
 
 
 -- 6. EXCHANGE RATES
@@ -353,12 +352,12 @@ CREATE TABLE IF NOT EXISTS fx_rates
     expires_at           TIMESTAMPTZ    NOT NULL,
     created_at           TIMESTAMPTZ              DEFAULT CURRENT_TIMESTAMP,
     updated_at           TIMESTAMPTZ              DEFAULT CURRENT_TIMESTAMP
-);
+)^^
 CREATE TRIGGER update_transactions_modtime
     BEFORE UPDATE
     ON fx_rates
     FOR EACH ROW
-EXECUTE FUNCTION update_modified_column();
+EXECUTE FUNCTION update_modified_column()^^
 
 
 -- 7. NOTIFICATIONS
@@ -392,12 +391,12 @@ CREATE TABLE IF NOT EXISTS notifications
                                                DEFAULT CURRENT_TIMESTAMP,
 
     updated_at        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+)^^
 CREATE TRIGGER update_transactions_modtime
     BEFORE UPDATE
     ON notifications
     FOR EACH ROW
-EXECUTE FUNCTION update_modified_column();
+EXECUTE FUNCTION update_modified_column()^^
 
 
 -- 8. INDEXES
