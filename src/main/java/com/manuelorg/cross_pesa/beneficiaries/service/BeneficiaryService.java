@@ -6,6 +6,8 @@ import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryResponse;
 import com.manuelorg.cross_pesa.beneficiaries.entity.Beneficiary;
 import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -19,12 +21,11 @@ public class BeneficiaryService {
     private final BeneficiaryRepository beneficiaryRepository;
 
     @Transactional(readOnly = true)
-    public List<BeneficiaryResponse> getUserBeneficiaries(UUID userId) {
-        return beneficiaryRepository.findAllByUserId(userId)
-                .stream()
-                .map(BeneficiaryResponse::fromEntity)
-                .toList();
+    public Page<BeneficiaryResponse> getUserBeneficiaries(UUID userId, Pageable pageable) {
+        return beneficiaryRepository.findAllByUserId(userId, pageable)
+                .map(BeneficiaryResponse::fromEntity);
     }
+
 
     @Transactional
     public BeneficiaryResponse createBeneficiary(User currentUser, BeneficiaryRequest request) {

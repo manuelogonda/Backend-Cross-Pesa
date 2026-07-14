@@ -25,7 +25,6 @@ import java.util.UUID;
 public class AdminService {
 
     private final TransactionRepository transactionRepository;
-    private final UserRepository userRepository;
 
     /**
      * Fetch paginated list of transactions with rich admin details.
@@ -57,54 +56,5 @@ public class AdminService {
         BigDecimal revenue = transactionRepository.sumPlatformFeesSince(startOfToday);
 
         return new DashboardMetricsResponse(txToday, pending, flagged, revenue);
-    }
-
-
-    @Transactional
-    public void updateUserStatus(UUID userId, AdminUserDto.UpdateStatusRequest request, String adminEmail) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-
-        // Don't let admins accidentally suspend themselves or other admins
-        if (user.getRole().name().equals("ADMIN")) {
-            throw new SecurityException("Cannot modify another Admin's status.");
-        }
-
-        user.setStatus(request.status());
-        userRepository.save(user);
-
-//        log.info("Admin {} changed User {} status to {}. Reason: {}", adminEmail, userId, request.status(), request.reason());
-        // Note: You could fire an Email Notification event here telling the user their account was suspended!
-    }
-
-    @Transactional
-    public void updateUserKyc(UUID userId, AdminUserDto.UpdateKycRequest request, String adminEmail) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
-
-        user.setKycStatus(request.kycStatus());
-        if (request.kycLevel() != null) {
-            user.setKycLevel(request.kycLevel());
-        }
-
-        userRepository.save(user);
-        log.info("Admin {} updated KYC for User {} to Status: {}, Level: {}. Notes: {}",
-                adminEmail, userId, request.kycStatus(), request.kycLevel(), request.adminNotes());
-    }
-
-    private AdminUserDto.AdminUserResponse mapToResponse(User user) {
-        return new AdminUserDto.AdminUserResponse(
-                user.getId(),
-                user.getFirstName(),
-                user.getLastName(),
-                user.getEmail(),
-                user.getPhoneNumber(),
-                user.getIdType(),
-                user.getIdNumber(),
-                user.getStatus(),
-                user.getKycStatus(),
-                user.getKycLevel(),
-                user.getCreatedAt() // Assuming your base entity has this
-        );
     }
 }

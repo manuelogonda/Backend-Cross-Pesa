@@ -6,6 +6,8 @@ import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryResponse;
 import com.manuelorg.cross_pesa.beneficiaries.service.BeneficiaryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,13 +25,14 @@ public class BeneficiaryController {
 
     /**
      * GET /api/v1/beneficiaries
-     * Lists all saved payout contacts for the logged-in user.
+     * Lists all saved payout contacts for the logged-in user (Paginated).
      */
     @GetMapping
-    public ResponseEntity<List<BeneficiaryResponse>> getBeneficiaries(
-            @AuthenticationPrincipal User currentUser
+    public ResponseEntity<Page<BeneficiaryResponse>> getBeneficiaries(
+            @AuthenticationPrincipal User currentUser,
+            Pageable pageable // Spring automatically handles ?page=0&size=20
     ) {
-        List<BeneficiaryResponse> beneficiaries = beneficiaryService.getUserBeneficiaries(currentUser.getId());
+        Page<BeneficiaryResponse> beneficiaries = beneficiaryService.getUserBeneficiaries(currentUser.getId(), pageable);
         return ResponseEntity.ok(beneficiaries);
     }
 

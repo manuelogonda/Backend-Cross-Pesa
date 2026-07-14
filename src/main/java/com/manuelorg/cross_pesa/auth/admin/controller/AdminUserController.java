@@ -2,8 +2,7 @@ package com.manuelorg.cross_pesa.auth.admin.controller;
 
 
 import com.manuelorg.cross_pesa.auth.admin.dto.AdminUserDto;
-import com.manuelorg.cross_pesa.auth.admin.service.AdminService;
-import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
+import com.manuelorg.cross_pesa.auth.admin.service.AdminUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -22,13 +21,13 @@ import java.util.UUID;
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminUserController {
 
-    private final AdminService adminUserService;
+    private final AdminUserService adminUserService;
 
 
     @GetMapping
     public ResponseEntity<Page<AdminUserDto.AdminUserResponse>> getUsers(
             @PageableDefault(size = 20, sort = "createdAt", direction = org.springframework.data.domain.Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(adminUserService.getAllTransactions());
+        return ResponseEntity.ok(adminUserService.getAllUsers(pageable));
     }
 
     @PutMapping("/{userId}/status")

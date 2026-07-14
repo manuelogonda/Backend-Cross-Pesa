@@ -4,6 +4,8 @@ import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.notification.dto.NotificationResponse;
 import com.manuelorg.cross_pesa.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -19,11 +21,12 @@ public class NotificationController {
     private final NotificationService notificationService;
 
     @GetMapping
-    public ResponseEntity<List<NotificationResponse>> getUserNotifications(
-            @AuthenticationPrincipal User currentUser) {
-
-        List<NotificationResponse> notifications =
-                notificationService.getUserDashboardNotifications(currentUser.getId());
+    public ResponseEntity<Page<NotificationResponse>> getUserNotifications(
+            @AuthenticationPrincipal User currentUser,
+            Pageable pageable
+    ) {
+        Page<NotificationResponse> notifications =
+                notificationService.getUserDashboardNotifications(currentUser.getId(), pageable);
         return ResponseEntity.ok(notifications);
     }
 

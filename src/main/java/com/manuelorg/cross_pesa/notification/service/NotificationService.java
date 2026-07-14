@@ -11,6 +11,8 @@ import com.manuelorg.cross_pesa.notification.entity.Notification;
 import com.manuelorg.cross_pesa.notification.enums.NotificationStatus;
 import com.manuelorg.cross_pesa.notification.repository.NotificationRepository;
 import jakarta.annotation.PostConstruct;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -121,11 +123,9 @@ public class NotificationService {
     // --- Dashboard UI Methods ---
 
     @Transactional(readOnly = true)
-    public List<NotificationResponse> getUserDashboardNotifications(UUID userId) {
-        return notificationRepository.findAllByUserIdOrderByCreatedAtDesc(userId)
-                .stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+    public Page<NotificationResponse> getUserDashboardNotifications(UUID userId, Pageable pageable) {
+        return notificationRepository.findAllByUserIdOrderByCreatedAtDesc(userId, pageable)
+                .map(this::mapToResponse);
     }
 
     @Transactional

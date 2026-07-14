@@ -54,6 +54,7 @@ public class User implements UserDetails {
     private LocalDate dateOfBirth;
 
     @Builder.Default
+    @Enumerated(EnumType.STRING)
     @Column(name = "kyc_status")
     private KycStatus kycStatus = KycStatus.PENDING;
 
@@ -72,6 +73,7 @@ public class User implements UserDetails {
     private Role role = Role.USER;
 
     @Builder.Default
+    @Enumerated(EnumType.STRING)
     @Column(name = "status")
     private UserStatus status = UserStatus.ACTIVE;
 
@@ -101,7 +103,7 @@ public class User implements UserDetails {
 
     @Override
     public boolean isAccountNonLocked() {
-        return true;
+        return this.status != UserStatus.LOCKED;
     }
 
     @Override
@@ -116,6 +118,6 @@ public class User implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return this.status.equals("ACTIVE");
+        return this.status == UserStatus.ACTIVE;
     }
 }
