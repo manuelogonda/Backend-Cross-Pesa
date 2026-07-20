@@ -3,6 +3,7 @@ package com.manuelorg.cross_pesa.auth.admin.controller;
 
 import com.manuelorg.cross_pesa.auth.admin.dto.AdminUserDto;
 import com.manuelorg.cross_pesa.auth.admin.service.AdminUserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -33,7 +34,7 @@ public class AdminUserController {
     @PutMapping("/{userId}/status")
     public ResponseEntity<Void> updateUserStatus(
             @PathVariable UUID userId,
-            @RequestBody AdminUserDto.UpdateStatusRequest request,
+            @Valid @RequestBody AdminUserDto.UpdateStatusRequest request,
             @AuthenticationPrincipal UserDetails adminDetails) {
 
         adminUserService.updateUserStatus(userId, request, adminDetails.getUsername());

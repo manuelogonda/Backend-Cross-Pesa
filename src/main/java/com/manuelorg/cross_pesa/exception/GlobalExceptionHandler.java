@@ -10,6 +10,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -63,9 +64,7 @@ public class GlobalExceptionHandler {
         return buildErrorResponse("An unexpected internal server error occurred", HttpStatus.INTERNAL_SERVER_ERROR, request, null);
     }
 
-    // ========================================================================
     // Helper Method to assemble the JSON structure
-    // ========================================================================
     private ResponseEntity<ErrorResponse> buildErrorResponse(
             String message,
             HttpStatus status,
@@ -83,4 +82,20 @@ public class GlobalExceptionHandler {
 
         return new ResponseEntity<>(errorResponse, status);
     }
+//    7. rate limiting
+    // Catch our custom Rate Limit Exception
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleRateLimitExceeded(RateLimitExceededException ex) {
+
+        // Build a clean JSON response for the React frontend
+        Map<String, Object> errorResponse = Map.of(
+                "timestamp", LocalDateTime.now(),
+                "status", HttpStatus.TOO_MANY_REQUESTS.value(),
+                "error", "Too Many Requests",
+                "message", ex.getMessage()
+        );
+
+        return new ResponseEntity<>(errorResponse, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
 }

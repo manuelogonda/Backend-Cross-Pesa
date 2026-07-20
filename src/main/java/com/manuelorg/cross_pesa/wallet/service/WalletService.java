@@ -78,4 +78,28 @@ public class WalletService {
         Wallet updatedWallet = walletRepository.save(wallet);
         return WalletResponse.fromEntity(updatedWallet);
     }
+
+    /**
+     * Real endpoint for live payment gateways (Flutterwave, Stripe, M-Pesa).
+     * Adds funds to a user's wallet after successful verification.
+     */
+    @Transactional
+    public WalletResponse addFunds(UUID userId, Currency currency, BigDecimal amount) {
+        // 1. Find the specific wallet
+        Wallet wallet = walletRepository.findByUserIdAndCurrency(userId, currency)
+                .orElseThrow(() -> new IllegalArgumentException("Wallet not found for currency: " + currency));
+
+        // 2. Prevent top-ups on frozen or suspended wallets
+        if (!wallet.getStatus().name().equals("ACTIVE")) {
+            throw new IllegalStateException("Cannot add funds to a " + wallet.getStatus() + " wallet.");
+        }
+
+        // 3. Add the funds
+        BigDecimal newBalance = wallet.getBalance().add(amount);
+        wallet.setBalance(newBalance);
+
+        // 4. Save to PostgreSQL and return updated state
+        Wallet updatedWallet = walletRepository.save(wallet);
+        return WalletResponse.fromEntity(updatedWallet);
+    }
 }

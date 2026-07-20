@@ -398,6 +398,41 @@ CREATE TRIGGER update_transactions_modtime
     FOR EACH ROW
 EXECUTE FUNCTION update_modified_column()^^
 
+-- 8 kyc submission
+CREATE TABLE kyc_submissions (
+                                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                                 user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+    -- The unique tracking ID provided by Smile ID SDK
+                                 smile_job_id VARCHAR(100) UNIQUE NOT NULL,
+
+    -- Document Metadata
+                                 document_type VARCHAR(50) NOT NULL, -- e.g., 'NATIONAL_ID', 'PASSPORT'
+                                 document_country VARCHAR(10) NOT NULL, -- e.g., 'KE', 'NG'
+
+    -- Cloudinary URLs (Stored after webhook confirmation)
+                                 id_image_url VARCHAR(500),
+                                 selfie_image_url VARCHAR(500),
+
+    -- Submission Status (PENDING, APPROVED, REJECTED, FAILED)
+                                 status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+
+    -- Context for failures or admin rejections
+                                 rejection_reason TEXT,
+
+    -- Admin tracking (Who approved/rejected this?)
+                                 reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                                 reviewed_at TIMESTAMP WITH TIME ZONE,
+
+                                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TRIGGER update_transactions_modtime
+    BEFORE UPDATE
+    ON kyc_submissions
+    FOR EACH ROW
+EXECUTE FUNCTION update_modified_column()^^
+
 
 -- 8. INDEXES
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone_number);
@@ -413,4 +448,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id);
 CREATE INDEX idx_ledger_wallet ON ledger_entries (wallet_id);
 CREATE INDEX idx_ledger_transaction ON ledger_entries (transaction_id);
 CREATE INDEX idx_ledger_created_at ON ledger_entries (created_at);
+CREATE INDEX idx_kyc_smile_job_id ON kyc_submissions(smile_job_id);
+CREATE INDEX idx_kyc_user_id ON kyc_submissions(user_id);
+CREATE INDEX idx_kyc_status ON kyc_submissions(status);
 
