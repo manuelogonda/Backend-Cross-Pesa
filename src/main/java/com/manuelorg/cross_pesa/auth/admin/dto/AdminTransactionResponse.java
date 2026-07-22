@@ -13,22 +13,29 @@ public record AdminTransactionResponse(
         String senderEmail,
         String beneficiaryName,
         String beneficiaryAccount,
-        BigDecimal sourceAmount,
+        BigDecimal grossAmount,
+        BigDecimal netAmount,
         String sourceCurrency,
         BigDecimal destinationAmount,
         String destinationCurrency,
         BigDecimal exchangeRate,
-        BigDecimal platformFee,
+        BigDecimal usdNormalizationRate,
+        BigDecimal markupFee,
+        BigDecimal routingFee,
+        BigDecimal totalFee,
         TransactionStatus status,
         String gatewayReference,
         OffsetDateTime createdAt
 ) {
     public static AdminTransactionResponse fromEntity(Transaction tx) {
+        // Handle optional beneficiary safely (P2P transfers don't have one)
         String benName = tx.getBeneficiary() != null ?
-                tx.getBeneficiary().getFirstName() + " " + tx.getBeneficiary().getLastName() : "Internal Exchange";
+                tx.getBeneficiary().getFirstName() + " " + tx.getBeneficiary().getLastName() :
+                (tx.getDestinationWallet() != null ? "P2P Transfer" : "System Exchange");
 
         String benAccount = tx.getBeneficiary() != null ?
-                tx.getBeneficiary().getAccountNumber() : "N/A";
+                tx.getBeneficiary().getAccountNumber() :
+                (tx.getDestinationWallet() != null ? tx.getDestinationWallet().getId().toString() : "N/A");
 
         return new AdminTransactionResponse(
                 tx.getId(),
@@ -36,14 +43,18 @@ public record AdminTransactionResponse(
                 tx.getSender().getEmail(),
                 benName,
                 benAccount,
-                tx.getSourceAmount(),
+                tx.getGrossAmount(),   // Replaced sourceAmount
+                tx.getNetAmount(),     // Added for transparency
                 tx.getSourceCurrency().name(),
                 tx.getDestinationAmount(),
                 tx.getDestinationCurrency().name(),
                 tx.getFxRateApplied(),
-                tx.getTransferFee(),
+                tx.getUsdNormalizationRate(), // Admin audit trail
+                tx.getMarkupFee(),     // Replaced transferFee
+                tx.getRoutingFee(),    // Replaced transferFee
+                tx.getTotalFee(),      // Replaced transferFee
                 tx.getStatus(),
-                tx.getGatewayReference(),
+                tx.getGatewayReference() != null ? tx.getGatewayReference() : tx.getPayoutReference(),
                 tx.getCreatedAt()
         );
     }

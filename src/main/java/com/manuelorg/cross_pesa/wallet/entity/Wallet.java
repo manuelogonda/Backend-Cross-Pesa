@@ -3,6 +3,7 @@ package com.manuelorg.cross_pesa.wallet.entity;
 import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
+import com.manuelorg.cross_pesa.wallet.enums.WalletType;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -13,12 +14,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(
-        name = "wallets",
-        uniqueConstraints = {
-                @UniqueConstraint(name = "uq_user_currency", columnNames = {"user_id", "currency"})
-        }
-)
+@Table(name = "wallets")
 @Getter
 @Setter
 @Builder
@@ -31,15 +27,18 @@ public class Wallet {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    // LAZY loading prevents pulling the entire User object every time you query a wallet
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
     @Builder.Default
     @Enumerated(EnumType.STRING)
+    @Column(name = "wallet_type", nullable = false, length = 30)
+    private WalletType walletType = WalletType.USER_RETAIL;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "currency", nullable = false, length = 3)
-    private Currency currency = Currency.KES;
+    private Currency currency;
 
     @Builder.Default
     @Column(name = "balance", nullable = false, precision = 18, scale = 4)
@@ -62,9 +61,13 @@ public class Wallet {
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
 
+    // ==========================================
+    // DOMAIN LOGIC HELPERS
+    // ==========================================
+
     /**
-     * Helper method to calculate the genuinely available balance.
-     * This keeps the business logic encapsulated inside the entity.
+     * Calculates the true spendable balance.
+     * Prevents users from spending funds that are tied up in pending transactions.
      */
     public BigDecimal getAvailableBalance() {
         return this.balance.subtract(this.lockedBalance);

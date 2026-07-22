@@ -4,8 +4,13 @@ import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.wallet.dto.WalletResponse;
 import com.manuelorg.cross_pesa.wallet.entity.Wallet;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
+import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
+import com.manuelorg.cross_pesa.wallet.enums.WalletType;
 import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +18,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class WalletService {
@@ -20,86 +26,118 @@ public class WalletService {
     private final WalletRepository walletRepository;
 
     /**
-     * Fetches all wallets for a user and maps them to DTOs.
-     * readOnly = true optimizes the Hibernate session since we aren't modifying data.
+     * Fetches the primary retail wallet belonging to a user.
+     * readOnly = true optimizes Hibernate session overhead.
      */
     @Transactional(readOnly = true)
-    public List<WalletResponse> getUserWallets(UUID userId) {
-        return walletRepository.findAllByUserId(userId)
-                .stream()
+    public WalletResponse getUserWallet(UUID userId) {
+        return walletRepository.findByUserId(userId)
                 .map(WalletResponse::fromEntity)
-                .toList(); // Available in Java 16+
+                .orElseThrow(() -> new IllegalArgumentException("Retail wallet not found for user ID: " + userId));
     }
 
     /**
-     * Creates a new currency wallet for a user.
-     * Standard @Transactional ensures the save operation is atomic.
+     * Creates a user's primary retail wallet in their chosen currency.
      */
     @Transactional
     public WalletResponse createWallet(User user, Currency currency) {
-        // 1. Enforce the business rule: One wallet per currency per user
-        if (walletRepository.existsByUserIdAndCurrency(user.getId(), currency)) {
-            throw new IllegalArgumentException("Wallet for currency " + currency + " already exists.");
+        // 1. Enforce business rule: Strict 1 retail wallet per user
+        if (walletRepository.existsByUserIdAndWalletType(user.getId(), WalletType.USER_RETAIL)) {
+            throw new IllegalStateException("User already has an active retail wallet.");
         }
 
-        // 2. Build the wallet. Balances and status are handled by @Builder.Default in the Entity.
-        var wallet = Wallet.builder()
+        // 2. Build entity explicitly setting the USER_RETAIL discriminator
+        Wallet wallet = Wallet.builder()
                 .user(user)
+                .walletType(WalletType.USER_RETAIL)
                 .currency(currency)
+                .balance(BigDecimal.ZERO)
+                .lockedBalance(BigDecimal.ZERO)
+                .status(WalletStatus.ACTIVE)
                 .build();
 
-        // 3. Persist to DB
+        // 3. Persist and map to DTO
         Wallet savedWallet = walletRepository.save(wallet);
-
-        // 4. Return the safe DTO to the controller
+        log.info("Successfully provisioned primary {} retail wallet for user ID: {}", currency, user.getId());
         return WalletResponse.fromEntity(savedWallet);
     }
 
     /**
-     * MOCK ENDPOINT: Simulates a successful payment gateway top-up.
-     * In a production environment, this would be a webhook triggered by M-Pesa or Stripe.
+     * Adds funds to a user's wallet.
+     * Validates that the deposit currency matches the wallet's native currency.
      */
     @Transactional
-    public WalletResponse mockTopUp(UUID userId, Currency currency, BigDecimal amount) {
-        // 1. Find the specific wallet
-        Wallet wallet = walletRepository.findByUserIdAndCurrency(userId, currency)
-                .orElseThrow(() -> new IllegalArgumentException("Wallet not found for currency: " + currency));
-
-        // 2. Prevent top-ups on frozen or suspended wallets
-        if (!wallet.getStatus().name().equals("ACTIVE")) {
-            throw new IllegalStateException("Cannot top up a " + wallet.getStatus() + " wallet.");
+    public WalletResponse addFunds(UUID userId, Currency currency, BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Deposit amount must be strictly greater than zero.");
         }
 
-        // 3. Add the funds
-        BigDecimal newBalance = wallet.getBalance().add(amount);
-        wallet.setBalance(newBalance);
+        // 1. Fetch the user's retail wallet
+        Wallet wallet = walletRepository.findByUserId(userId)
+                .orElseThrow(() -> new IllegalArgumentException("Retail wallet not found for user ID: " + userId));
 
-        // 4. Save and return updated state
+        // 2. Validate Currency Match
+        if (wallet.getCurrency() != currency) {
+            throw new IllegalArgumentException(String.format(
+                    "Currency mismatch: Wallet is in %s, but attempted deposit was in %s.",
+                    wallet.getCurrency(), currency
+            ));
+        }
+
+        // 3. Ensure the wallet is active
+        if (wallet.getStatus() != WalletStatus.ACTIVE) {
+            throw new IllegalStateException("Cannot add funds to a " + wallet.getStatus() + " wallet.");
+        }
+
+        // 4. Update balance
+        wallet.setBalance(wallet.getBalance().add(amount));
+
+        // 5. Save and return DTO
         Wallet updatedWallet = walletRepository.save(wallet);
+        log.info("Credited {} {} to retail wallet of user ID: {}", amount, currency, userId);
         return WalletResponse.fromEntity(updatedWallet);
     }
 
     /**
-     * Real endpoint for live payment gateways (Flutterwave, Stripe, M-Pesa).
-     * Adds funds to a user's wallet after successful verification.
+     * MOCK ENDPOINT: Simulates a successful gateway top-up during testing.
      */
     @Transactional
-    public WalletResponse addFunds(UUID userId, Currency currency, BigDecimal amount) {
-        // 1. Find the specific wallet
-        Wallet wallet = walletRepository.findByUserIdAndCurrency(userId, currency)
-                .orElseThrow(() -> new IllegalArgumentException("Wallet not found for currency: " + currency));
+    public WalletResponse mockTopUp(UUID userId, Currency currency, BigDecimal amount) {
+        return addFunds(userId, currency, amount);
+    }
 
-        // 2. Prevent top-ups on frozen or suspended wallets
-        if (!wallet.getStatus().name().equals("ACTIVE")) {
-            throw new IllegalStateException("Cannot add funds to a " + wallet.getStatus() + " wallet.");
+    /**
+     * System Wallet Provisioner / Lookup.
+     * Ensures system operational wallets (SYSTEM_MARKUP, SYSTEM_ROUTING, SYSTEM_LIQUIDITY)
+     * exist for double-entry ledger settlement.
+     */
+    @Transactional
+    public Wallet getOrCreateSystemWallet(WalletType walletType, Currency currency, User systemUser) {
+        if (walletType == WalletType.USER_RETAIL) {
+            throw new IllegalArgumentException("Use createWallet for retail user accounts.");
         }
 
-        // 3. Add the funds
-        BigDecimal newBalance = wallet.getBalance().add(amount);
-        wallet.setBalance(newBalance);
+        return walletRepository.findByWalletTypeAndCurrency(walletType, currency)
+                .orElseGet(() -> {
+                    log.info("Auto-provisioning missing system wallet: TYPE={}, CURRENCY={}", walletType, currency);
+                    Wallet systemWallet = Wallet.builder()
+                            .user(systemUser)
+                            .walletType(walletType)
+                            .currency(currency)
+                            .balance(BigDecimal.ZERO)
+                            .lockedBalance(BigDecimal.ZERO)
+                            .status(WalletStatus.ACTIVE)
+                            .build();
+                    return walletRepository.save(systemWallet);
+                });
+    }
 
-        // 4. Save to PostgreSQL and return updated state
-        Wallet updatedWallet = walletRepository.save(wallet);
-        return WalletResponse.fromEntity(updatedWallet);
+    /**
+     * Admin query: Paginated fetch of all system wallets.
+     */
+    @Transactional(readOnly = true)
+    public Page<WalletResponse> getAllWallets(Pageable pageable) {
+        return walletRepository.findAll(pageable)
+                .map(WalletResponse::fromEntity);
     }
 }

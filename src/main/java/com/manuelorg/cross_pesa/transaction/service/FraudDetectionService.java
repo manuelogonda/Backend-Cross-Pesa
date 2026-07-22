@@ -28,7 +28,6 @@ public class FraudDetectionService {
     private static final BigDecimal MAX_TRANSACTION_LIMIT_KES = new BigDecimal("100000.00");
     private static final int MAX_TRANSACTIONS_PER_HOUR = 5;
 
-
     /**
      * Hard blocks: Rejects the transaction completely if rules are violated.
      */
@@ -47,7 +46,8 @@ public class FraudDetectionService {
         // 3. Convert to Base Currency (KES) for Limit Checking
         BigDecimal amountInKes = amount;
         if (sourceCurrency != Currency.KES) {
-            FxRateResponse rateResponse = fxRateService.getLiveQuote(sourceCurrency, Currency.KES);
+            // FIX: Added .name() to match FxRateService string parameters
+            FxRateResponse rateResponse = fxRateService.getLiveQuote(sourceCurrency.name(), Currency.KES.name());
             amountInKes = amount.multiply(rateResponse.exchangeRate());
         }
 
@@ -76,8 +76,8 @@ public class FraudDetectionService {
         // Rule 1: High Value Transaction Check (> 100k KES)
         BigDecimal amountInKes = amount;
         if (sourceCurrency != Currency.KES) {
-            // Convert to KES base to check the limit
-            FxRateResponse rateResponse = fxRateService.getLiveQuote(sourceCurrency, Currency.KES);
+            // FIX: Added .name() to match FxRateService string parameters
+            FxRateResponse rateResponse = fxRateService.getLiveQuote(sourceCurrency.name(), Currency.KES.name());
             amountInKes = amount.multiply(rateResponse.exchangeRate());
         }
 

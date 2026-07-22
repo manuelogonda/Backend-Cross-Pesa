@@ -28,46 +28,19 @@ public class WalletController {
 
     /**
      * GET /api/v1/wallets
-     * Fetches all wallets for the currently logged-in user.
-     * @AuthenticationPrincipal automatically injects the User object from the JWT context.
+     * Fetches the single primary retail wallet for the currently logged-in user.
      */
     @GetMapping
-    public ResponseEntity<List<WalletResponse>> getUserWallets(
+    public ResponseEntity<WalletResponse> getUserWallet(
             @AuthenticationPrincipal User currentUser
     ) {
-        List<WalletResponse> wallets = walletService.getUserWallets(currentUser.getId());
-        return ResponseEntity.ok(wallets);
-    }
-
-    /**
-     * POST /api/v1/wallets/top-up
-     * Mock endpoint to simulate adding funds.
-     */
-    @PostMapping("/topup")
-    public ResponseEntity<Map<String, String>> initiateTopUp(
-            @AuthenticationPrincipal User currentUser, // Spring Security automatically injects the logged-in user
-            @Valid @RequestBody TopUpRequest request
-    ) {
-        System.out.println(" REQUEST REACHED THE CONTROLLER! User: " + currentUser.getEmail());
-        // 1. Call Flutterwave to generate the secure payment link
-        String paymentLink = flutterwaveService.initializePayment(
-                currentUser.getEmail(),
-                currentUser.getFirstName() + " " + currentUser.getLastName(),
-                request.amount().toPlainString(),
-                String.valueOf(request.currency())
-        );
-
-        // 2. Return the link to the React frontend
-        // React will receive this and execute: window.location.href = response.data.paymentLink;
-        return ResponseEntity.ok(Map.of(
-                "message", "Payment link generated successfully",
-                "paymentLink", paymentLink
-        ));
+        WalletResponse wallet = walletService.getUserWallet(currentUser.getId());
+        return ResponseEntity.ok(wallet);
     }
 
     /**
      * POST /api/v1/wallets
-     * Creates a new wallet for the currently logged-in user.
+     * Creates a new primary retail wallet for the currently logged-in user.
      */
     @PostMapping
     public ResponseEntity<WalletResponse> createWallet(
@@ -78,29 +51,61 @@ public class WalletController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    /**
+     * POST /api/v1/wallets/topup
+     * Generates a Flutterwave checkout payment link.
+     */
+    @PostMapping("/topup")
+    public ResponseEntity<Map<String, String>> initiateTopUp(
+            @AuthenticationPrincipal User currentUser,
+            @Valid @RequestBody TopUpRequest request
+    ) {
+        String paymentLink = flutterwaveService.initializePayment(
+                currentUser.getEmail(),
+                currentUser.getFirstName() + " " + currentUser.getLastName(),
+                request.amount().toPlainString(),
+                request.currency().name()
+        );
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Payment link generated successfully",
+                "paymentLink", paymentLink
+        ));
+    }
+
+    /**
+     * POST /api/v1/wallets/verify
+     * Verifies the Flutterwave transaction and credits the user's wallet.
+     * Protected against replay attacks via gateway reference tracking.
+     */
     @PostMapping("/verify")
-    public ResponseEntity<?> verifyTopUp(
+    public ResponseEntity<Map<String, String>> verifyTopUp(
             @RequestParam String transactionId,
             @RequestParam String amount,
             @RequestParam String currency,
-            @AuthenticationPrincipal User currentUser) { // Make sure you are injecting the logged-in user!
+            @AuthenticationPrincipal User currentUser
+    ) {
+        // 1. Validate Currency Payload
+        Currency targetCurrency;
+        try {
+            targetCurrency = Currency.valueOf(currency.toUpperCase().trim());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Unsupported currency code: " + currency));
+        }
 
-        // 1. Ask Flutterwave if this transaction is real and matches our data
+        // 2. Verify with Flutterwave gateway
         boolean isValid = flutterwaveService.verifyTransaction(transactionId, amount, currency);
-
         if (!isValid) {
             return ResponseEntity.badRequest().body(Map.of("error", "Payment verification failed or amount mismatch."));
         }
 
-        // 2. IT IS REAL! Now we actually add the funds to PostgreSQL
-        // We convert the String currency to your Enum, and the String amount to a BigDecimal
+        // 3. Deposit funds safely into user's wallet
         walletService.addFunds(
                 currentUser.getId(),
-                Currency.valueOf(currency.toUpperCase()),
+                targetCurrency,
                 new BigDecimal(amount)
         );
 
-        // 3. Send the success response back to React
         return ResponseEntity.ok(Map.of(
                 "status", "SUCCESS",
                 "message", "Wallet funded successfully!"

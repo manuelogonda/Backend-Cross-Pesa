@@ -17,26 +17,33 @@ import java.util.UUID;
 @Repository
 public interface TransactionRepository extends JpaRepository<Transaction, UUID> {
 
-    // Checks if we've already processed this exact transaction attempt
+    // Idempotency & Lookups
     boolean existsByIdempotencyKey(UUID idempotencyKey);
+
     Optional<Transaction> findByGatewayReference(String gatewayReference);
-    // Velocity Check: Count transactions for a user since a specific time
+
+    // Velocity Check for Fraud Engine
     @Query("SELECT COUNT(t) FROM Transaction t WHERE t.sender.id = :userId AND t.createdAt >= :since")
     long countRecentTransactionsByUser(@Param("userId") UUID userId, @Param("since") OffsetDateTime since);
-    
-    //pagination
+
+    // User-Facing Statements & History
+    Page<Transaction> findBySenderId(UUID senderId, Pageable pageable);
+
+    // Global Admin Pagination
     Page<Transaction> findAll(Pageable pageable);
 
     Page<Transaction> findAllByStatus(TransactionStatus status, Pageable pageable);
 
-    // --- ADMIN DASHBOARD QUERIES ---
-    // 2. Metrics: Count by Status
+    // --- ADMIN DASHBOARD METRICS ---
     long countByStatus(TransactionStatus status);
 
-    // 3. Metrics: Count transactions created after a certain date (e.g., today)
     long countByCreatedAtAfter(OffsetDateTime date);
 
-    // 4. Metrics: Sum total fees collected today (Revenue)
-    @Query("SELECT COALESCE(SUM(t.transferFee), 0) FROM Transaction t WHERE t.createdAt >= :since AND t.status = 'COMPLETED'")
+    // FIXED: Renamed transferFee -> totalFee to match new entity schema
+    @Query("SELECT COALESCE(SUM(t.totalFee), 0) FROM Transaction t WHERE t.createdAt >= :since AND t.status = 'COMPLETED'")
     BigDecimal sumPlatformFeesSince(@Param("since") OffsetDateTime since);
+
+    // Optional: Separate Net Revenue (Platform Margin only, excluding routing fees)
+    @Query("SELECT COALESCE(SUM(t.markupFee), 0) FROM Transaction t WHERE t.createdAt >= :since AND t.status = 'COMPLETED'")
+    BigDecimal sumNetMarkupRevenueSince(@Param("since") OffsetDateTime since);
 }

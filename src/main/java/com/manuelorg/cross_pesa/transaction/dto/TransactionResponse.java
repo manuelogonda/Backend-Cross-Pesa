@@ -5,24 +5,26 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
-
 public class TransactionResponse {
 
     /**
-     * Response for external remittances.
-     * Guaranteed to have a Beneficiary, but no destination wallet.
+     * Response DTO for external remittances.
      */
     public record SendMoneyResponse(
             UUID id,
             UUID senderId,
             UUID sourceWalletId,
-            UUID beneficiaryId, // Required for sends
+            UUID beneficiaryId,
             String sourceCurrency,
             String destinationCurrency,
-            BigDecimal amountSent,
+            BigDecimal grossAmount,
+            BigDecimal netAmount,
+            BigDecimal markupFee,
+            BigDecimal routingFee,
+            BigDecimal totalFee,
             BigDecimal amountReceived,
-            BigDecimal transferFee,
             BigDecimal fxRateApplied,
+            BigDecimal usdNormalizationRate,
             String reference,
             String status,
             OffsetDateTime createdAt
@@ -32,14 +34,18 @@ public class TransactionResponse {
                     tx.getId(),
                     tx.getSender().getId(),
                     tx.getSourceWallet().getId(),
-                    tx.getBeneficiary().getId(),
+                    tx.getBeneficiary() != null ? tx.getBeneficiary().getId() : null,
                     tx.getSourceCurrency().name(),
                     tx.getDestinationCurrency().name(),
-                    tx.getSourceAmount(),
+                    tx.getGrossAmount(),
+                    tx.getNetAmount(),
+                    tx.getMarkupFee(),
+                    tx.getRoutingFee(),
+                    tx.getTotalFee(),
                     tx.getDestinationAmount(),
-                    tx.getTransferFee(),
                     tx.getFxRateApplied(),
-                    tx.getGatewayReference(),
+                    tx.getUsdNormalizationRate(),
+                    tx.getGatewayReference() != null ? tx.getGatewayReference() : tx.getPayoutReference(),
                     tx.getStatus().name(),
                     tx.getCreatedAt()
             );
@@ -47,19 +53,23 @@ public class TransactionResponse {
     }
 
     /**
-     * Response for internal wallet-to-wallet exchanges.
-     * Guaranteed to have a Destination Wallet, but no beneficiary and no flat fee.
+     * Response DTO for P2P / Wallet-to-Wallet transfers.
      */
     public record ExchangeResponse(
             UUID id,
             UUID senderId,
             UUID sourceWalletId,
-            UUID destinationWalletId, // Required for exchanges
+            UUID destinationWalletId,
             String sourceCurrency,
             String destinationCurrency,
-            BigDecimal amountExchanged,
+            BigDecimal grossAmount,
+            BigDecimal netAmount,
+            BigDecimal markupFee,
+            BigDecimal routingFee,
+            BigDecimal totalFee,
             BigDecimal amountReceived,
             BigDecimal fxRateApplied,
+            BigDecimal usdNormalizationRate,
             String reference,
             String status,
             OffsetDateTime createdAt
@@ -69,13 +79,18 @@ public class TransactionResponse {
                     tx.getId(),
                     tx.getSender().getId(),
                     tx.getSourceWallet().getId(),
-                    tx.getDestinationWallet().getId(),
+                    tx.getDestinationWallet() != null ? tx.getDestinationWallet().getId() : null,
                     tx.getSourceCurrency().name(),
                     tx.getDestinationCurrency().name(),
-                    tx.getSourceAmount(),
+                    tx.getGrossAmount(),
+                    tx.getNetAmount(),
+                    tx.getMarkupFee(),
+                    tx.getRoutingFee(),
+                    tx.getTotalFee(),
                     tx.getDestinationAmount(),
                     tx.getFxRateApplied(),
-                    tx.getGatewayReference(),
+                    tx.getUsdNormalizationRate(),
+                    tx.getGatewayReference() != null ? tx.getGatewayReference() : "P2P-INTERNAL",
                     tx.getStatus().name(),
                     tx.getCreatedAt()
             );

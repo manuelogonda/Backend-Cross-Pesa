@@ -7,18 +7,16 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 public record FxRateResponse(
-        UUID quoteId,
         String sourceCurrency,
         String destinationCurrency,
-        BigDecimal exchangeRate, // This is the clientRate
+        BigDecimal exchangeRate,
         OffsetDateTime expiresAt
 ) {
     public static FxRateResponse fromEntity(FxRate fxRate) {
         return new FxRateResponse(
-                fxRate.getId(),
-                fxRate.getSourceCurrency().name(),
-                fxRate.getDestinationCurrency().name(),
-                fxRate.getClientRate(),
+                fxRate.getSourceCurrency(),
+                fxRate.getDestinationCurrency(),
+                fxRate.getRate(),
                 fxRate.getExpiresAt()
         );
     }

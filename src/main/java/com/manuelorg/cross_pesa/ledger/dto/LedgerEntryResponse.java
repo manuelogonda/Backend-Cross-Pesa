@@ -9,20 +9,27 @@ import java.util.UUID;
 public record LedgerEntryResponse(
         UUID id,
         UUID transactionId,
-        String entryType,
+        UUID walletId,
+        String entryClass,
+        BigDecimal debit,
+        BigDecimal credit,
         String currency,
-        BigDecimal amount,
         BigDecimal balanceAfter,
         String description,
         OffsetDateTime createdAt
 ) {
+    /**
+     * Maps a LedgerEntry entity into an immutable DTO.
+     */
     public static LedgerEntryResponse fromEntity(LedgerEntry entry) {
         return new LedgerEntryResponse(
                 entry.getId(),
-                entry.getTransaction().getId(),
-                entry.getEntryType().name(),
-                entry.getCurrency().name(),
-                entry.getAmount(),
+                entry.getTransaction() != null ? entry.getTransaction().getId() : null,
+                entry.getWallet() != null ? entry.getWallet().getId() : null,
+                entry.getEntryClass(),
+                entry.getDebit(),
+                entry.getCredit(),
+                entry.getCurrency() != null ? entry.getCurrency().name() : null,
                 entry.getBalanceAfter(),
                 entry.getDescription(),
                 entry.getCreatedAt()

@@ -133,7 +133,16 @@ CREATE TABLE IF NOT EXISTS wallets
     user_id        UUID           NOT NULL
         REFERENCES users (id) ON DELETE RESTRICT,
 
-    currency       VARCHAR(3)     NOT NULL DEFAULT 'KES'
+    -- THE DISCRIMINATOR COLUMN
+    wallet_type    VARCHAR(30)    NOT NULL DEFAULT 'USER_RETAIL'
+        CHECK (wallet_type IN (
+                               'USER_RETAIL',      -- Standard customer wallet (1 per user)
+                               'SYSTEM_MARKUP',    --  profit from volume tiers
+                               'SYSTEM_ROUTING',   --  profit from corridor routing
+                               'SYSTEM_LIQUIDITY'  --  holding account for gateway clearing
+            )),
+
+    currency       VARCHAR(3)     NOT NULL
         CHECK (currency IN ('KES', 'USD', 'CNY',
                             'JPY', 'GBP', 'CAD', 'AUD', 'PKR',
                             'AED', 'SAR', 'EUR', 'SEK'
@@ -148,16 +157,28 @@ CREATE TABLE IF NOT EXISTS wallets
     status         VARCHAR(20)    NOT NULL DEFAULT 'ACTIVE'
         CHECK (status IN ('ACTIVE', 'FROZEN', 'SUSPENDED')),
 
-    created_at     TIMESTAMPTZ    NOT NULL
-                                           DEFAULT CURRENT_TIMESTAMP,
+    created_at     TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    updated_at     TIMESTAMPTZ    NOT NULL
-                                           DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT uq_user_currency UNIQUE (user_id, currency),
-
+    -- Ensures a user can never lock more money than they actually have
     CONSTRAINT check_valid_reservation CHECK (balance >= locked_balance)
-)^^
+);
+
+-- ==========================================
+-- SMART UNIQUE CONSTRAINTS (Partial Indexes)
+-- ==========================================
+
+-- 1. Enforce 1-User-1-Wallet STRICTLY for retail customers only.
+CREATE UNIQUE INDEX uq_user_retail_wallet
+    ON wallets (user_id)
+    WHERE wallet_type = 'USER_RETAIL';
+
+-- 2. Enforce that the system only has exactly ONE wallet per currency per type.
+-- (e.g., You can only have one 'SYSTEM_MARKUP' wallet for 'GBP').
+CREATE UNIQUE INDEX uq_system_wallet_currency
+    ON wallets (user_id, currency, wallet_type)
+    WHERE wallet_type != 'USER_RETAIL';
 
 CREATE TRIGGER update_wallets_modtime
     BEFORE UPDATE
@@ -168,56 +189,62 @@ EXECUTE FUNCTION update_modified_column()^^
 -- 4. TRANSACTIONS
 CREATE TABLE IF NOT EXISTS transactions
 (
-    id                    UUID PRIMARY KEY             DEFAULT gen_random_uuid(),
+    id                    UUID PRIMARY KEY       DEFAULT gen_random_uuid(),
 
-    sender_id             UUID                NOT NULL
+    sender_id             UUID                   NOT NULL
         REFERENCES users (id) ON DELETE RESTRICT,
 
-    beneficiary_id        UUID              NULL
+    beneficiary_id        UUID                   NULL
         REFERENCES beneficiaries (id) ON DELETE RESTRICT,
 
-    source_wallet_id      UUID                NOT NULL
+    source_wallet_id      UUID                   NOT NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
-    destination_wallet_id UUID           NULL
+    destination_wallet_id UUID                   NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
-    source_currency       VARCHAR(3)          NOT NULL,
+    source_currency       VARCHAR(3)             NOT NULL,
+    destination_currency  VARCHAR(3)             NOT NULL,
 
-    destination_currency  VARCHAR(3)          NOT NULL,
+    -- 1. THE AMOUNTS (Separating Gross from Net)
+    gross_amount          NUMERIC(18, 4)         NOT NULL
+        CHECK (gross_amount > 0.0000),
 
-    source_amount         DECIMAL(18, 4)
-        CHECK (source_amount > 0.000000),
+    net_amount            NUMERIC(18, 4)         NOT NULL
+        CHECK (net_amount > 0.0000),
 
-    destination_amount    DECIMAL(18, 4)
-        CHECK (destination_amount > 0.000000),
+    -- 2. THE FEE BREAKDOWN (All stored in source_currency)
+    markup_fee            NUMERIC(18, 4)         NOT NULL DEFAULT 0.0000,
+    routing_fee           NUMERIC(18, 4)         NOT NULL DEFAULT 0.0000,
+    total_fee             NUMERIC(18, 4)         NOT NULL DEFAULT 0.0000,
+    CHECK (total_fee = markup_fee + routing_fee),
+    CHECK (net_amount = gross_amount - total_fee), -- Airtight DB-level math lock
 
-    transfer_fee          NUMERIC(18, 4)
-        CHECK (transfer_fee >= 0.000000),
+    -- 3. THE FX AUDIT TRAIL
+    usd_normalization_rate NUMERIC(18, 6)        NOT NULL
+        CHECK (usd_normalization_rate > 0.000000),
 
-    fx_rate_applied       NUMERIC(18, 6)      NOT NULL
+    fx_rate_applied       NUMERIC(18, 6)         NOT NULL
         CHECK (fx_rate_applied > 0.000000),
 
-    funding_gateway       VARCHAR(50),
+    destination_amount    NUMERIC(18, 4)         NOT NULL
+        CHECK (destination_amount > 0.0000),
 
-    gateway_reference     VARCHAR(150) UNIQUE NOT NULL,
+    -- 4. EXTERNAL GATEWAYS (Made Nullable for internal P2P transfers)
+    funding_gateway       VARCHAR(50),
+    gateway_reference     VARCHAR(150) UNIQUE,
 
     payout_gateway        VARCHAR(50),
+    payout_reference      VARCHAR(150) UNIQUE,
 
-    payout_reference      VARCHAR(150) UNIQUE NOT NULL,
-
-    status                VARCHAR(30)         NOT NULL DEFAULT 'PENDING'
+    status                VARCHAR(30)            NOT NULL DEFAULT 'PENDING'
         CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED')),
 
-    idempotency_key       UUID UNIQUE         NOT NULL,
+    idempotency_key       UUID UNIQUE            NOT NULL,
 
-    created_at            TIMESTAMPTZ         NOT NULL
-                                                       DEFAULT CURRENT_TIMESTAMP,
-
-    updated_at            TIMESTAMPTZ         NOT NULL
-                                                       DEFAULT CURRENT_TIMESTAMP
-
-)^^
+    created_at            TIMESTAMPTZ            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMPTZ            NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TRIGGER update_transactions_modtime
     BEFORE UPDATE
@@ -228,60 +255,71 @@ EXECUTE FUNCTION update_modified_column()^^
 -- 5 LEDGER ENTRIES
 CREATE TABLE IF NOT EXISTS ledger_entries
 (
-    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    transaction_id UUID           NOT NULL
+    transaction_id         UUID           NOT NULL
         REFERENCES transactions (id) ON DELETE RESTRICT,
 
-    wallet_id      UUID           NOT NULL
+    wallet_id              UUID           NOT NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
-    entry_type     VARCHAR(50)    NOT NULL
-        CHECK ( entry_type IN ('DEBIT', 'CREDIT')),
+    -- Categorizes the exact nature of this specific line item
+    entry_class            VARCHAR(50)    NOT NULL
+        CHECK (entry_class IN ('PRINCIPAL_TRANSFER', 'MARKUP_FEE', 'ROUTING_FEE','FX_CLEARING', 'DEPOSIT', 'WITHDRAWAL', 'REFUND')),
 
-    currency       VARCHAR(3)     NOT NULL,
+    debit                  NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
+    credit                 NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
+    currency               VARCHAR(3)     NOT NULL,
 
-    amount         DECIMAL(18, 4) NOT NULL
-        CHECK ( amount > 0.0000 ),
-
-    balance_after  DECIMAL(18, 4) NOT NULL -- The O(1) performance lifesaver
+    balance_after          NUMERIC(18, 4) NOT NULL
         CHECK ( balance_after >= 0.0000 ),
 
-    description    VARCHAR(255)   NOT NULL,
+    description            VARCHAR(255)   NOT NULL,
 
-    created_at     TIMESTAMPTZ      DEFAULT CURRENT_TIMESTAMP,
+    -- ==========================================
+    -- PRICING ENGINE AUDIT TRAIL
+    -- ==========================================
+    routing_pair           VARCHAR(10)    NULL, -- e.g., 'GBP_KES' or 'DEFAULT'
 
-    updated_at     TIMESTAMPTZ    NOT NULL
-                                    DEFAULT CURRENT_TIMESTAMP
-)^^
+    markup_tiers_applied   VARCHAR(100)   NULL, -- e.g., 'TIER_1, TIER_2'
 
+    usd_baseline_amount    NUMERIC(18, 4) NULL, -- The USD value that justified the tiers at that millisecond
+
+    created_at             TIMESTAMPTZ    DEFAULT CURRENT_TIMESTAMP,
+
+    -- Enforces that both cannot be zero (no empty transactions)
+    -- Enforces that if debit > 0, credit must be 0, and vice versa.
+    CONSTRAINT chk_debit_credit_exclusive CHECK (
+        (debit > 0 AND credit = 0) OR
+        (credit > 0 AND debit = 0)
+        )
+);
+
+-- Trigger Function: Synchronize Wallet Balance
 CREATE OR REPLACE FUNCTION process_ledger_entry_and_sync_wallet()
     RETURNS TRIGGER AS
 $$
 DECLARE
-    current_wallet_balance DECIMAL(18, 4);
+    current_wallet_balance NUMERIC(18, 4);
 BEGIN
     -- 1. Lock the specific wallet row to prevent concurrent race conditions
-    -- This guarantees no other transaction can modify this wallet until this entry completes.
     SELECT balance
     INTO current_wallet_balance
     FROM wallets
     WHERE id = NEW.wallet_id
         FOR UPDATE;
-    -- 2. Calculate the new balance based on the entry type
-    IF NEW.entry_type = 'DEBIT' THEN
+
+    -- 2. Calculate the new balance based on which column has the value
+    IF NEW.debit > 0 THEN
         -- Defensive check: Prevent overdrafts at the ledger level
-        IF current_wallet_balance < NEW.amount THEN
+        IF current_wallet_balance < NEW.debit THEN
             RAISE EXCEPTION 'Insufficient funds in wallet %', NEW.wallet_id;
         END IF;
+        NEW.balance_after := current_wallet_balance - NEW.debit;
 
-        NEW.balance_after := current_wallet_balance - NEW.amount;
+    ELSIF NEW.credit > 0 THEN
+        NEW.balance_after := current_wallet_balance + NEW.credit;
 
-    ELSIF NEW.entry_type = 'CREDIT' THEN
-        NEW.balance_after := current_wallet_balance + NEW.amount;
-
-    ELSE
-        RAISE EXCEPTION 'Invalid ledger entry type. Must be DEBIT or CREDIT.';
     END IF;
 
     -- 3. Update the wallet's cached balance
@@ -290,18 +328,17 @@ BEGIN
         updated_at = CURRENT_TIMESTAMP
     WHERE id = NEW.wallet_id;
 
-    -- 4. The trigger returns the modified NEW row, which now perfectly contains
-    -- the calculated balance_after, allowing the INSERT to finally complete.
+    -- 4. Return the NEW row with the injected balance_after so the INSERT completes
     RETURN NEW;
 END
-$$ LANGUAGE plpgsql^^
+$$ LANGUAGE plpgsql;
 
 -- Attach the sync engine to execute BEFORE the ledger insert finishes
 CREATE TRIGGER trigger_process_ledger_entry
     BEFORE INSERT
     ON ledger_entries
     FOR EACH ROW
-EXECUTE FUNCTION process_ledger_entry_and_sync_wallet()^^
+EXECUTE FUNCTION process_ledger_entry_and_sync_wallet();
 
 -- Block Updates and Deletes explicitly at the Database Level
 CREATE OR REPLACE FUNCTION block_immutable_ledger_changes()
@@ -316,14 +353,7 @@ CREATE TRIGGER trigger_protect_ledger_updates
     BEFORE UPDATE OR DELETE
     ON ledger_entries
     FOR EACH ROW
-EXECUTE FUNCTION block_immutable_ledger_changes()^^
-
-CREATE TRIGGER update_transactions_modtime
-    BEFORE UPDATE
-    ON ledger_entries
-    FOR EACH ROW
-EXECUTE FUNCTION update_modified_column()^^
-
+EXECUTE FUNCTION block_immutable_ledger_changes();
 
 -- 6. EXCHANGE RATES
 CREATE TABLE IF NOT EXISTS fx_rates
@@ -332,27 +362,25 @@ CREATE TABLE IF NOT EXISTS fx_rates
 
     source_currency      VARCHAR(3)     NOT NULL,
 
-    provider             VARCHAR(100)   NOT NULL
-        CHECK ( provider IN ('Chipper Cash', 'Flutter wave', 'Nium', 'Convera', 'Korapay') ),
-
     destination_currency VARCHAR(3)     NOT NULL,
 
-    -- The actual rate provided by your liquidity source (e.g., 1 USD = 129.50 KES)
-    mid_market_rate      DECIMAL(14, 6) NOT NULL,
+    -- The raw mid-market rate provided by Open Exchange Rates (e.g., 1 USD = 129.500000 KES)
+    rate                 NUMERIC(18, 6) NOT NULL
+        CHECK (rate > 0.000000),
 
-    -- The percentage markup your platform charges (e.g., 0.0150 for a 1.5% fee spread)
-    markup_percentage    DECIMAL(6, 4)  NOT NULL  DEFAULT 0.0000,
+    valid_from           TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    -- The final calculated conversion rate shown to the consumer
-    -- Math: mid_market_rate * (1 - markup_percentage) [for outbound] or * (1 + markup_percentage)
-    client_rate          DECIMAL(14, 6) NOT NULL,
-
-    valid_from           TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-
+    -- Defines when this specific rate lock expires and a new pull is required
     expires_at           TIMESTAMPTZ    NOT NULL,
-    created_at           TIMESTAMPTZ              DEFAULT CURRENT_TIMESTAMP,
-    updated_at           TIMESTAMPTZ              DEFAULT CURRENT_TIMESTAMP
-)^^
+
+    created_at           TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at           TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    -- Safety Check Constraints
+    CONSTRAINT chk_different_currencies CHECK (source_currency <> destination_currency),
+    CONSTRAINT chk_valid_expiry_window CHECK (expires_at > valid_from)
+);
 CREATE TRIGGER update_transactions_modtime
     BEFORE UPDATE
     ON fx_rates
@@ -435,6 +463,9 @@ EXECUTE FUNCTION update_modified_column()^^
 
 
 -- 8. INDEXES
+-- Index for O(1) live rate lookups by currency pair and expiry window
+CREATE INDEX idx_fx_rates_active_lookup
+    ON fx_rates (source_currency, destination_currency, expires_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users (phone_number);
 CREATE INDEX IF NOT EXISTS idx_users_kyc ON users (kyc_status);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);

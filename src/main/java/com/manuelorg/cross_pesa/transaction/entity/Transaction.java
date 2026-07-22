@@ -52,30 +52,52 @@ public class Transaction {
     @Column(name = "destination_currency", nullable = false, length = 3, updatable = false)
     private Currency destinationCurrency;
 
-    @Column(name = "source_amount", precision = 18, scale = 4, updatable = false)
-    private BigDecimal sourceAmount;
+    // --- AMOUNTS & FEES ---
 
-    @Column(name = "destination_amount", precision = 18, scale = 4, updatable = false)
-    private BigDecimal destinationAmount;
+    @Column(name = "gross_amount", nullable = false, precision = 18, scale = 4, updatable = false)
+    private BigDecimal grossAmount;
+
+    @Column(name = "net_amount", nullable = false, precision = 18, scale = 4, updatable = false)
+    private BigDecimal netAmount;
 
     @Builder.Default
-    @Column(name = "transfer_fee", precision = 18, scale = 4, updatable = false)
-    private BigDecimal transferFee = BigDecimal.ZERO;
+    @Column(name = "markup_fee", nullable = false, precision = 18, scale = 4, updatable = false)
+    private BigDecimal markupFee = BigDecimal.ZERO;
+
+    @Builder.Default
+    @Column(name = "routing_fee", nullable = false, precision = 18, scale = 4, updatable = false)
+    private BigDecimal routingFee = BigDecimal.ZERO;
+
+    @Builder.Default
+    @Column(name = "total_fee", nullable = false, precision = 18, scale = 4, updatable = false)
+    private BigDecimal totalFee = BigDecimal.ZERO;
+
+    // --- FX AUDIT TRAIL ---
+
+    @Column(name = "usd_normalization_rate", nullable = false, precision = 18, scale = 6, updatable = false)
+    private BigDecimal usdNormalizationRate;
 
     @Column(name = "fx_rate_applied", nullable = false, precision = 18, scale = 6, updatable = false)
     private BigDecimal fxRateApplied;
 
+    @Column(name = "destination_amount", nullable = false, precision = 18, scale = 4, updatable = false)
+    private BigDecimal destinationAmount;
+
+    // --- GATEWAYS & REFERENCES ---
+
     @Column(name = "funding_gateway", length = 50)
     private String fundingGateway;
 
-    @Column(name = "gateway_reference", length = 150, unique = true, nullable = false)
+    @Column(name = "gateway_reference", length = 150, unique = true, nullable = true)
     private String gatewayReference;
 
     @Column(name = "payout_gateway", length = 50)
     private String payoutGateway;
 
-    @Column(name = "payout_reference", length = 150, unique = true, nullable = false)
+    @Column(name = "payout_reference", length = 150, unique = true, nullable = true)
     private String payoutReference;
+
+    // --- STATUS & IDEMPOTENCY ---
 
     @Builder.Default
     @Enumerated(EnumType.STRING)

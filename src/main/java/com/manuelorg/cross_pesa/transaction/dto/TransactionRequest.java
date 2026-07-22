@@ -11,7 +11,7 @@ public class TransactionRequest {
 
         /**
          * Request DTO for external remittances.
-         * Requires a Beneficiary ID instead of a Destination Wallet.
+         * Deducts funds + tiered fees from sender's wallet and sends net amount to external beneficiary.
          */
         public record SendMoneyRequest(
                 @NotNull(message = "Source wallet ID is required")
@@ -35,8 +35,8 @@ public class TransactionRequest {
         ) {}
 
         /**
-         * Request DTO for internal wallet-to-wallet exchanges.
-         * Requires a Destination Wallet ID instead of a Beneficiary.
+         * Request DTO for Peer-to-Peer (P2P) transfers.
+         * Moves funds directly between user wallets across currencies using the pricing engine.
          */
         public record ExchangeFundsRequest(
                 @NotNull(message = "Source wallet ID is required")

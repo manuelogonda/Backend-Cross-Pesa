@@ -78,6 +78,7 @@ cross-pesa:
   fx:
     oer:
       app-id: ${OER_APP_ID}
+      base-url: ${OER_BASE_URL}
 
 africastalking:
   username: ${AT_USERNAME:sandbox}
