@@ -28,84 +28,89 @@ public class Transaction {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    // --- RELATIONS ---
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "sender_id", nullable = false, updatable = false)
+    @JoinColumn(name = "sender_id", nullable = false)
     private User sender;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = true)
-    @JoinColumn(name = "beneficiary_id", nullable = true, updatable = false)
-    private Beneficiary beneficiary;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "beneficiary_id")
+    private Beneficiary beneficiary; // Ensure you have a Beneficiary entity stub
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "source_wallet_id", nullable = false, updatable = false)
+    @JoinColumn(name = "source_wallet_id", nullable = false)
     private Wallet sourceWallet;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = true)
-    @JoinColumn(name = "destination_wallet_id", nullable = true, updatable = false)
-    private Wallet destinationWallet;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "destination_wallet_id")
+    private Wallet destinationWallet; // E.g., The SYSTEM_LIQUIDITY pool
+
+    // --- CURRENCIES ---
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "source_currency", nullable = false, length = 3, updatable = false)
+    @Column(name = "source_currency", nullable = false, length = 3)
     private Currency sourceCurrency;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "destination_currency", nullable = false, length = 3, updatable = false)
+    @Column(name = "destination_currency", nullable = false, length = 3)
     private Currency destinationCurrency;
 
-    // --- AMOUNTS & FEES ---
+    // --- AMOUNTS (Precision 18, Scale 4) ---
 
-    @Column(name = "gross_amount", nullable = false, precision = 18, scale = 4, updatable = false)
+    @Column(name = "gross_amount", nullable = false, precision = 18, scale = 4)
     private BigDecimal grossAmount;
 
-    @Column(name = "net_amount", nullable = false, precision = 18, scale = 4, updatable = false)
+    @Column(name = "net_amount", nullable = false, precision = 18, scale = 4)
     private BigDecimal netAmount;
 
     @Builder.Default
-    @Column(name = "markup_fee", nullable = false, precision = 18, scale = 4, updatable = false)
+    @Column(name = "markup_fee", nullable = false, precision = 18, scale = 4)
     private BigDecimal markupFee = BigDecimal.ZERO;
 
     @Builder.Default
-    @Column(name = "routing_fee", nullable = false, precision = 18, scale = 4, updatable = false)
+    @Column(name = "routing_fee", nullable = false, precision = 18, scale = 4)
     private BigDecimal routingFee = BigDecimal.ZERO;
 
     @Builder.Default
-    @Column(name = "total_fee", nullable = false, precision = 18, scale = 4, updatable = false)
+    @Column(name = "total_fee", nullable = false, precision = 18, scale = 4)
     private BigDecimal totalFee = BigDecimal.ZERO;
 
-    // --- FX AUDIT TRAIL ---
+    // --- FX AUDIT TRAIL (Precision 18, Scale 6 for extreme accuracy) ---
 
-    @Column(name = "usd_normalization_rate", nullable = false, precision = 18, scale = 6, updatable = false)
+    @Column(name = "usd_normalization_rate", nullable = false, precision = 18, scale = 6)
     private BigDecimal usdNormalizationRate;
 
-    @Column(name = "fx_rate_applied", nullable = false, precision = 18, scale = 6, updatable = false)
+    @Column(name = "fx_rate_applied", nullable = false, precision = 18, scale = 6)
     private BigDecimal fxRateApplied;
 
-    @Column(name = "destination_amount", nullable = false, precision = 18, scale = 4, updatable = false)
+    @Column(name = "destination_amount", nullable = false, precision = 18, scale = 4)
     private BigDecimal destinationAmount;
 
-    // --- GATEWAYS & REFERENCES ---
+    // --- GATEWAY TRACING ---
 
     @Column(name = "funding_gateway", length = 50)
     private String fundingGateway;
 
-    @Column(name = "gateway_reference", length = 150, unique = true, nullable = true)
+    @Column(name = "gateway_reference", length = 150)
     private String gatewayReference;
 
     @Column(name = "payout_gateway", length = 50)
     private String payoutGateway;
 
-    @Column(name = "payout_reference", length = 150, unique = true, nullable = true)
+    @Column(name = "payout_reference", length = 150)
     private String payoutReference;
 
-    // --- STATUS & IDEMPOTENCY ---
+    // --- METADATA ---
 
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     private TransactionStatus status = TransactionStatus.PENDING;
 
+    @Builder.Default
     @Column(name = "idempotency_key", nullable = false, unique = true, updatable = false)
-    private UUID idempotencyKey;
+    private UUID idempotencyKey = UUID.randomUUID();
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
@@ -114,4 +119,23 @@ public class Transaction {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
+
+    // ==========================================
+    // MATHEMATICAL INTEGRITY HOOKS
+    // ==========================================
+
+    /**
+     * Guarantees the Java state perfectly satisfies the PostgreSQL
+     * `chk_total_fee_match` and `chk_net_amount_match` constraints before saving.
+     */
+    @PrePersist
+    @PreUpdate
+    public void calculateIntegrityFields() {
+        if (markupFee == null) markupFee = BigDecimal.ZERO;
+        if (routingFee == null) routingFee = BigDecimal.ZERO;
+        if (grossAmount == null) grossAmount = BigDecimal.ZERO;
+
+        this.totalFee = this.markupFee.add(this.routingFee);
+        this.netAmount = this.grossAmount.subtract(this.totalFee);
+    }
 }

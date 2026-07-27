@@ -124,22 +124,20 @@ CREATE TRIGGER trigger_update_beneficiaries_timestamp
     FOR EACH ROW
 EXECUTE FUNCTION update_modified_column()^^
 
-
--- 3. WALLETS
 CREATE TABLE IF NOT EXISTS wallets
 (
     id             UUID PRIMARY KEY        DEFAULT gen_random_uuid(),
 
-    user_id        UUID           NOT NULL
+    -- CHANGED TO NULL: Allows system accounts to belong directly to the platform
+    user_id        UUID                    NULL
         REFERENCES users (id) ON DELETE RESTRICT,
 
-    -- THE DISCRIMINATOR COLUMN
     wallet_type    VARCHAR(30)    NOT NULL DEFAULT 'USER_RETAIL'
         CHECK (wallet_type IN (
-                               'USER_RETAIL',      -- Standard customer wallet (1 per user)
-                               'SYSTEM_MARKUP',    --  profit from volume tiers
-                               'SYSTEM_ROUTING',   --  profit from corridor routing
-                               'SYSTEM_LIQUIDITY'  --  holding account for gateway clearing
+                               'USER_RETAIL',
+                               'SYSTEM_MARKUP',
+                               'SYSTEM_ROUTING',
+                               'SYSTEM_LIQUIDITY'
             )),
 
     currency       VARCHAR(3)     NOT NULL
@@ -148,8 +146,7 @@ CREATE TABLE IF NOT EXISTS wallets
                             'AED', 'SAR', 'EUR', 'SEK'
             )),
 
-    balance        NUMERIC(18, 4) NOT NULL DEFAULT 0.0000
-        CHECK (balance >= 0.0000),
+    balance        NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
 
     locked_balance NUMERIC(18, 4) NOT NULL DEFAULT 0.0000
         CHECK (locked_balance >= 0.0000),
@@ -161,23 +158,32 @@ CREATE TABLE IF NOT EXISTS wallets
 
     updated_at     TIMESTAMPTZ    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
+    -- ENFORCES INTEGRITY PER WALLET CLASS TYPE
+    -- 1. Standard customers cannot spend past zero and must link to a valid user record.
+    -- 2. System wallets must never link to a standard customer account identifier.
+    CONSTRAINT check_wallet_class_rules CHECK (
+        (wallet_type = 'USER_RETAIL' AND user_id IS NOT NULL AND balance >= 0.0000) OR
+        (wallet_type IN ('SYSTEM_MARKUP', 'SYSTEM_ROUTING', 'SYSTEM_LIQUIDITY') AND user_id IS NULL)
+        ),
+
     -- Ensures a user can never lock more money than they actually have
     CONSTRAINT check_valid_reservation CHECK (balance >= locked_balance)
 );
 
 -- ==========================================
--- SMART UNIQUE CONSTRAINTS (Partial Indexes)
+-- SMART UNIQUE CONSTRAINTS (Fixed Partial Indexes)
 -- ==========================================
 
--- 1. Enforce 1-User-1-Wallet STRICTLY for retail customers only.
+-- 1. Enforce 1-User-1-Wallet per currency STRICTLY for retail customers.
+-- (Allows 1 customer to hold multiple currency accounts if your capstone expands!)
 CREATE UNIQUE INDEX uq_user_retail_wallet
-    ON wallets (user_id)
+    ON wallets (user_id, currency)
     WHERE wallet_type = 'USER_RETAIL';
 
--- 2. Enforce that the system only has exactly ONE wallet per currency per type.
--- (e.g., You can only have one 'SYSTEM_MARKUP' wallet for 'GBP').
+-- 2. FIXED: Enforce that the platform has exactly ONE system wallet per currency per type.
+-- (Removes the NULL user_id problem entirely)
 CREATE UNIQUE INDEX uq_system_wallet_currency
-    ON wallets (user_id, currency, wallet_type)
+    ON wallets (currency, wallet_type)
     WHERE wallet_type != 'USER_RETAIL';
 
 CREATE TRIGGER update_wallets_modtime
@@ -186,7 +192,6 @@ CREATE TRIGGER update_wallets_modtime
     FOR EACH ROW
 EXECUTE FUNCTION update_modified_column()^^
 
--- 4. TRANSACTIONS
 CREATE TABLE IF NOT EXISTS transactions
 (
     id                    UUID PRIMARY KEY       DEFAULT gen_random_uuid(),
@@ -200,6 +205,8 @@ CREATE TABLE IF NOT EXISTS transactions
     source_wallet_id      UUID                   NOT NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
+    -- COUPLING IN ACTION: For cross-border, your backend inserts the
+    -- matching destination corridor's 'SYSTEM_LIQUIDITY' Wallet UUID here.
     destination_wallet_id UUID                   NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
@@ -217,8 +224,10 @@ CREATE TABLE IF NOT EXISTS transactions
     markup_fee            NUMERIC(18, 4)         NOT NULL DEFAULT 0.0000,
     routing_fee           NUMERIC(18, 4)         NOT NULL DEFAULT 0.0000,
     total_fee             NUMERIC(18, 4)         NOT NULL DEFAULT 0.0000,
-    CHECK (total_fee = markup_fee + routing_fee),
-    CHECK (net_amount = gross_amount - total_fee), -- Airtight DB-level math lock
+
+    -- AIRTIGHT MATHEMATICAL INTEGRITY LOCKS
+    CONSTRAINT chk_total_fee_match CHECK (total_fee = markup_fee + routing_fee),
+    CONSTRAINT chk_net_amount_match CHECK (net_amount = gross_amount - total_fee),
 
     -- 3. THE FX AUDIT TRAIL
     usd_normalization_rate NUMERIC(18, 6)        NOT NULL
@@ -230,12 +239,12 @@ CREATE TABLE IF NOT EXISTS transactions
     destination_amount    NUMERIC(18, 4)         NOT NULL
         CHECK (destination_amount > 0.0000),
 
-    -- 4. EXTERNAL GATEWAYS (Made Nullable for internal P2P transfers)
+    -- 4. EXTERNAL GATEWAYS
     funding_gateway       VARCHAR(50),
-    gateway_reference     VARCHAR(150) UNIQUE,
+    gateway_reference     VARCHAR(150), -- Removed flat UNIQUE constraint
 
     payout_gateway        VARCHAR(50),
-    payout_reference      VARCHAR(150) UNIQUE,
+    payout_reference      VARCHAR(150), -- Removed flat UNIQUE constraint
 
     status                VARCHAR(30)            NOT NULL DEFAULT 'PENDING'
         CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED')),
@@ -246,13 +255,26 @@ CREATE TABLE IF NOT EXISTS transactions
     updated_at            TIMESTAMPTZ            NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- ==========================================
+-- SAFE CONDITIONAL EXCLUSIONS (Partial Indexes)
+-- ==========================================
+
+-- Ensures gateway reference fields remain perfectly unique ONLY when they hold a non-null string value.
+CREATE UNIQUE INDEX uq_gateway_reference_active
+    ON transactions (gateway_reference)
+    WHERE gateway_reference IS NOT NULL;
+
+CREATE UNIQUE INDEX uq_payout_reference_active
+    ON transactions (payout_reference)
+    WHERE payout_reference IS NOT NULL;
+
 CREATE TRIGGER update_transactions_modtime
     BEFORE UPDATE
     ON transactions
     FOR EACH ROW
 EXECUTE FUNCTION update_modified_column()^^
 
--- 5 LEDGER ENTRIES
+
 CREATE TABLE IF NOT EXISTS ledger_entries
 (
     id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -263,7 +285,6 @@ CREATE TABLE IF NOT EXISTS ledger_entries
     wallet_id              UUID           NOT NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
-    -- Categorizes the exact nature of this specific line item
     entry_class            VARCHAR(50)    NOT NULL
         CHECK (entry_class IN ('PRINCIPAL_TRANSFER', 'MARKUP_FEE', 'ROUTING_FEE','FX_CLEARING', 'DEPOSIT', 'WITHDRAWAL', 'REFUND')),
 
@@ -271,55 +292,59 @@ CREATE TABLE IF NOT EXISTS ledger_entries
     credit                 NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
     currency               VARCHAR(3)     NOT NULL,
 
-    balance_after          NUMERIC(18, 4) NOT NULL
-        CHECK ( balance_after >= 0.0000 ),
+    -- REMOVED THE STATIC CHECK: Handled dynamically per wallet type in the trigger
+    balance_after          NUMERIC(18, 4) NOT NULL,
 
     description            VARCHAR(255)   NOT NULL,
 
     -- ==========================================
     -- PRICING ENGINE AUDIT TRAIL
     -- ==========================================
-    routing_pair           VARCHAR(10)    NULL, -- e.g., 'GBP_KES' or 'DEFAULT'
-
-    markup_tiers_applied   VARCHAR(100)   NULL, -- e.g., 'TIER_1, TIER_2'
-
-    usd_baseline_amount    NUMERIC(18, 4) NULL, -- The USD value that justified the tiers at that millisecond
+    routing_pair           VARCHAR(10)    NULL,
+    markup_tiers_applied   VARCHAR(100)   NULL,
+    usd_baseline_amount    NUMERIC(18, 4) NULL,
 
     created_at             TIMESTAMPTZ    DEFAULT CURRENT_TIMESTAMP,
 
-    -- Enforces that both cannot be zero (no empty transactions)
-    -- Enforces that if debit > 0, credit must be 0, and vice versa.
     CONSTRAINT chk_debit_credit_exclusive CHECK (
         (debit > 0 AND credit = 0) OR
         (credit > 0 AND debit = 0)
         )
 );
 
--- Trigger Function: Synchronize Wallet Balance
+-- ==========================================
+-- DYNAMIC BALANCE SYNCHRONIZATION ENGINE
+-- ==========================================
 CREATE OR REPLACE FUNCTION process_ledger_entry_and_sync_wallet()
     RETURNS TRIGGER AS
 $$
 DECLARE
     current_wallet_balance NUMERIC(18, 4);
+    target_wallet_type     VARCHAR(30);
 BEGIN
-    -- 1. Lock the specific wallet row to prevent concurrent race conditions
-    SELECT balance
-    INTO current_wallet_balance
+    -- 1. Lock row and fetch BOTH the balance and type from the unified table
+    SELECT balance, wallet_type
+    INTO current_wallet_balance, target_wallet_type
     FROM wallets
     WHERE id = NEW.wallet_id
         FOR UPDATE;
 
-    -- 2. Calculate the new balance based on which column has the value
+    -- 2. Calculate the new balance based on entry direction
     IF NEW.debit > 0 THEN
-        -- Defensive check: Prevent overdrafts at the ledger level
-        IF current_wallet_balance < NEW.debit THEN
-            RAISE EXCEPTION 'Insufficient funds in wallet %', NEW.wallet_id;
+        -- Dynamic Overdraft Enforcement: Only customers are blocked from negative balances
+        IF target_wallet_type = 'USER_RETAIL' AND current_wallet_balance < NEW.debit THEN
+            RAISE EXCEPTION 'Insufficient funds in customer retail wallet %', NEW.wallet_id;
         END IF;
+
         NEW.balance_after := current_wallet_balance - NEW.debit;
 
     ELSIF NEW.credit > 0 THEN
         NEW.balance_after := current_wallet_balance + NEW.credit;
+    END IF;
 
+    -- Extra Safety: Customer wallets can never end up negative under any edge case
+    IF target_wallet_type = 'USER_RETAIL' AND NEW.balance_after < 0.0000 THEN
+        RAISE EXCEPTION 'Safety Violation: Target customer balance cannot drop below 0';
     END IF;
 
     -- 3. Update the wallet's cached balance
@@ -328,27 +353,31 @@ BEGIN
         updated_at = CURRENT_TIMESTAMP
     WHERE id = NEW.wallet_id;
 
-    -- 4. Return the NEW row with the injected balance_after so the INSERT completes
+    -- 4. Complete the ledger injection sequence
     RETURN NEW;
 END
 $$ LANGUAGE plpgsql;
 
--- Attach the sync engine to execute BEFORE the ledger insert finishes
+-- Attach balance sync trigger
+DROP TRIGGER IF EXISTS trigger_process_ledger_entry ON ledger_entries;
 CREATE TRIGGER trigger_process_ledger_entry
     BEFORE INSERT
     ON ledger_entries
     FOR EACH ROW
 EXECUTE FUNCTION process_ledger_entry_and_sync_wallet();
 
--- Block Updates and Deletes explicitly at the Database Level
+-- ==========================================
+-- ABSOLUTE IMMUTABILITY TRIGGER
+-- ==========================================
 CREATE OR REPLACE FUNCTION block_immutable_ledger_changes()
     RETURNS TRIGGER AS
 $$
 BEGIN
-    RAISE EXCEPTION 'Financial Ledger entries are immutable. You cannot modify or delete past logs.';
+    RAISE EXCEPTION 'Financial Ledger entries are immutable. State mutation or deletion is strictly forbidden.';
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_protect_ledger_updates ON ledger_entries;
 CREATE TRIGGER trigger_protect_ledger_updates
     BEFORE UPDATE OR DELETE
     ON ledger_entries

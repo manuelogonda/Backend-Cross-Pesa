@@ -12,6 +12,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -35,7 +36,7 @@ public class TransactionController {
             @Valid @RequestBody TransactionRequest.SendMoneyRequest request
     ) {
         TransactionResponse.SendMoneyResponse response = transactionService.processSendMoney(currentUser, request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /**
@@ -47,9 +48,8 @@ public class TransactionController {
             @AuthenticationPrincipal User currentUser,
             @Valid @RequestBody TransactionRequest.ExchangeFundsRequest request
     ) {
-        // FIXED: Updated method call to processPeerToPeerTransfer
         TransactionResponse.ExchangeResponse response = transactionService.processPeerToPeerTransfer(currentUser, request);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /**

@@ -1,4 +1,4 @@
-package com.manuelorg.cross_pesa.transaction.service;
+package com.manuelorg.cross_pesa.systemEngine;
 
 import com.manuelorg.cross_pesa.transaction.dto.QuoteResult;
 import org.springframework.stereotype.Service;
@@ -63,12 +63,14 @@ public class TransactionFeeEngineService {
         // ====================================================================
         BigDecimal totalMarkupUsd = BigDecimal.ZERO;
         BigDecimal remainingUsd = normalizedUsdAmount;
+        StringBuilder tiersApplied = new StringBuilder(); // NEW: Dynamically track tiers for the audit trail
 
         // Tier 1: First $1,000
         if (remainingUsd.compareTo(BigDecimal.ZERO) > 0) {
             BigDecimal tier1Amount = remainingUsd.min(TIER_1_LIMIT);
             totalMarkupUsd = totalMarkupUsd.add(tier1Amount.multiply(TIER_1_RATE));
             remainingUsd = remainingUsd.subtract(tier1Amount);
+            tiersApplied.append("TIER_1");
         }
 
         // Tier 2: Next $4,000 (From $1,001 to $5,000)
@@ -77,11 +79,13 @@ public class TransactionFeeEngineService {
             BigDecimal tier2Amount = remainingUsd.min(tier2Capacity);
             totalMarkupUsd = totalMarkupUsd.add(tier2Amount.multiply(TIER_2_RATE));
             remainingUsd = remainingUsd.subtract(tier2Amount);
+            tiersApplied.append(",TIER_2");
         }
 
         // Tier 3: Anything over $5,000
         if (remainingUsd.compareTo(BigDecimal.ZERO) > 0) {
             totalMarkupUsd = totalMarkupUsd.add(remainingUsd.multiply(TIER_3_RATE));
+            tiersApplied.append(",TIER_3");
         }
 
         // Scale the markup back to the Source Currency (e.g., $37.64 USD * 0.78 = £29.36 GBP)
@@ -115,15 +119,19 @@ public class TransactionFeeEngineService {
         BigDecimal payoutAmountTarget = amountAfterFees.multiply(sourceToTargetRate)
                 .setScale(4, RoundingMode.HALF_UP);
 
-        // Return the immutable Quote DTO
+        // Return the immutable Quote DTO with correctly mapped variables
         return new QuoteResult(
-                amountSent,
-                totalPlatformFee,
-                totalMarkupSource,
-                routingCostSource,
-                amountAfterFees,
-                payoutAmountTarget,
-                sourceToTargetRate
+                amountSent,              // 1. amountSent
+                totalPlatformFee,        // 2. totalPlatformFee
+                totalMarkupSource,       // 3. platformMarkupFee (Mapped from totalMarkupSource)
+                routingCostSource,       // 4. routingCostFee (Mapped from routingCostSource)
+                amountAfterFees,         // 5. amountAfterFees
+                payoutAmountTarget,      // 6. payoutAmountTarget
+                sourceToTargetRate,      // 7. appliedExchangeRate (Mapped from sourceToTargetRate)
+                usdToSourceRate,         // 8. usdNormalizationRate
+                routeKey,                // 9. routingPair (Mapped from routeKey)
+                tiersApplied.toString(), // 10. markupTiersApplied
+                normalizedUsdAmount      // 11. usdBaselineAmount (Mapped from normalizedUsdAmount)
         );
     }
 }

@@ -17,33 +17,54 @@ import java.util.UUID;
 @Repository
 public interface TransactionRepository extends JpaRepository<Transaction, UUID> {
 
-    // Idempotency & Lookups
+    // --- IDEMPOTENCY & LOOKUPS ---
+
     boolean existsByIdempotencyKey(UUID idempotencyKey);
 
     Optional<Transaction> findByGatewayReference(String gatewayReference);
 
-    // Velocity Check for Fraud Engine
+    // --- FRAUD ENGINE ---
+
+    /**
+     * Velocity Check for Fraud Engine to count how many transactions
+     * a user has attempted within a recent time window.
+     */
     @Query("SELECT COUNT(t) FROM Transaction t WHERE t.sender.id = :userId AND t.createdAt >= :since")
     long countRecentTransactionsByUser(@Param("userId") UUID userId, @Param("since") OffsetDateTime since);
 
-    // User-Facing Statements & History
+    // --- USER-FACING STATEMENTS ---
+
     Page<Transaction> findBySenderId(UUID senderId, Pageable pageable);
 
-    // Global Admin Pagination
+    // --- GLOBAL ADMIN PAGINATION ---
+
     Page<Transaction> findAll(Pageable pageable);
 
     Page<Transaction> findAllByStatus(TransactionStatus status, Pageable pageable);
 
     // --- ADMIN DASHBOARD METRICS ---
+
     long countByStatus(TransactionStatus status);
 
     long countByCreatedAtAfter(OffsetDateTime date);
 
-    // FIXED: Renamed transferFee -> totalFee to match new entity schema
-    @Query("SELECT COALESCE(SUM(t.totalFee), 0) FROM Transaction t WHERE t.createdAt >= :since AND t.status = 'COMPLETED'")
-    BigDecimal sumPlatformFeesSince(@Param("since") OffsetDateTime since);
+    /**
+     * Calculates Gross Revenue (Total Fees collected).
+     * Parameterized the status to strictly enforce the TransactionStatus Enum type.
+     */
+    @Query("SELECT COALESCE(SUM(t.totalFee), 0) FROM Transaction t WHERE t.createdAt >= :since AND t.status = :status")
+    BigDecimal sumPlatformFeesSince(
+            @Param("since") OffsetDateTime since,
+            @Param("status") TransactionStatus status
+    );
 
-    // Optional: Separate Net Revenue (Platform Margin only, excluding routing fees)
-    @Query("SELECT COALESCE(SUM(t.markupFee), 0) FROM Transaction t WHERE t.createdAt >= :since AND t.status = 'COMPLETED'")
-    BigDecimal sumNetMarkupRevenueSince(@Param("since") OffsetDateTime since);
+    /**
+     * Calculates Net Revenue (Platform Margin only, excluding external routing costs).
+     * Parameterized the status to strictly enforce the TransactionStatus Enum type.
+     */
+    @Query("SELECT COALESCE(SUM(t.markupFee), 0) FROM Transaction t WHERE t.createdAt >= :since AND t.status = :status")
+    BigDecimal sumNetMarkupRevenueSince(
+            @Param("since") OffsetDateTime since,
+            @Param("status") TransactionStatus status
+    );
 }

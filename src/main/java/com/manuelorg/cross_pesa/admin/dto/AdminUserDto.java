@@ -1,4 +1,4 @@
-package com.manuelorg.cross_pesa.auth.admin.dto;
+package com.manuelorg.cross_pesa.admin.dto;
 
 import com.manuelorg.cross_pesa.auth.entity.KycStatus;
 import com.manuelorg.cross_pesa.auth.entity.UserStatus;

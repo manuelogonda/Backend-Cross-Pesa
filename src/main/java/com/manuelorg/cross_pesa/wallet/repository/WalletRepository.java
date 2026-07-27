@@ -21,13 +21,20 @@ public interface WalletRepository extends JpaRepository<Wallet, UUID> {
     // --- RETAIL WALLET LOOKUPS ---
 
     /**
-     * Fetches the user's primary retail wallet.
+     * Fetches a wallet by User ID and Wallet Type.
+     * Replaces the hardcoded @Query for better refactoring safety.
+     * (Used heavily by WalletService for addFunds and getUserWallet)
      */
-    @Query("SELECT w FROM Wallet w WHERE w.user.id = :userId AND w.walletType = com.manuelorg.cross_pesa.wallet.enums.WalletType.USER_RETAIL")
-    Optional<Wallet> findByUserId(@Param("userId") UUID userId);
+    Optional<Wallet> findByUserIdAndWalletType(UUID userId, WalletType walletType);
 
     /**
-     * Checks if a user already owns a retail wallet before creation.
+     * Convenience method for backward compatibility.
+     * (Used by AdminUserOpsService)
+     */
+    Optional<Wallet> findByUserId(UUID userId);
+
+    /**
+     * Checks if a user already owns a specific type of wallet before creation.
      */
     boolean existsByUserIdAndWalletType(UUID userId, WalletType walletType);
 
@@ -36,8 +43,10 @@ public interface WalletRepository extends JpaRepository<Wallet, UUID> {
     /**
      * CRITICAL FOR LEDGER: Fetches system revenue/holding wallets
      * (e.g. SYSTEM_MARKUP for GBP, SYSTEM_ROUTING for KES, SYSTEM_LIQUIDITY for USD).
+     *
+     * Note: We use the WalletType Enum here to guarantee type-safety matching your entity.
      */
-    Optional<Wallet> findByWalletTypeAndCurrency(WalletType walletType, Currency currency);
+    Optional<Wallet> findByCurrencyAndWalletType(Currency currency, WalletType walletType);
 
     // --- ADMIN DASHBOARD & AUDIT LOOKUPS ---
 

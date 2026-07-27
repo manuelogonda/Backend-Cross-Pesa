@@ -49,7 +49,8 @@ public class AuthService {
 
         User savedUser = repository.save(user);
 
-        walletService.createWallet(savedUser, Currency.KES);
+        Currency selectedCurrency = request.currency() != null ? request.currency() : Currency.KES;
+        walletService.createWallet(savedUser, selectedCurrency);
 
         var accessToken = jwtService.generateAccessToken(user);
         var refreshToken = jwtService.generateRefreshToken(user);

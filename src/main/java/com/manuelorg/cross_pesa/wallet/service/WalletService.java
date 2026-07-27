@@ -1,12 +1,19 @@
 package com.manuelorg.cross_pesa.wallet.service;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
+import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
+import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
+import com.manuelorg.cross_pesa.ledger.repository.LedgerEntryRepository;
+import com.manuelorg.cross_pesa.transaction.entity.Transaction;
+import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
+import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
 import com.manuelorg.cross_pesa.wallet.dto.WalletResponse;
 import com.manuelorg.cross_pesa.wallet.entity.Wallet;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
 import com.manuelorg.cross_pesa.wallet.enums.WalletType;
 import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -24,6 +31,9 @@ import java.util.UUID;
 public class WalletService {
 
     private final WalletRepository walletRepository;
+    private final TransactionRepository transactionRepository;
+    private final LedgerEntryRepository ledgerEntryRepository;
+    private final EntityManager entityManager;
 
     /**
      * Fetches the primary retail wallet belonging to a user.
@@ -31,7 +41,7 @@ public class WalletService {
      */
     @Transactional(readOnly = true)
     public WalletResponse getUserWallet(UUID userId) {
-        return walletRepository.findByUserId(userId)
+        return walletRepository.findByUserIdAndWalletType(userId, WalletType.USER_RETAIL)
                 .map(WalletResponse::fromEntity)
                 .orElseThrow(() -> new IllegalArgumentException("Retail wallet not found for user ID: " + userId));
     }
@@ -59,21 +69,24 @@ public class WalletService {
         // 3. Persist and map to DTO
         Wallet savedWallet = walletRepository.save(wallet);
         log.info("Successfully provisioned primary {} retail wallet for user ID: {}", currency, user.getId());
+
         return WalletResponse.fromEntity(savedWallet);
     }
 
     /**
-     * Adds funds to a user's wallet.
+     * Adds funds to a user's wallet via the Double-Entry Ledger.
      * Validates that the deposit currency matches the wallet's native currency.
      */
     @Transactional
-    public WalletResponse addFunds(UUID userId, Currency currency, BigDecimal amount) {
+    public WalletResponse addFunds(UUID userId, Currency currency, BigDecimal amount, String reference) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Deposit amount must be strictly greater than zero.");
         }
 
+
+
         // 1. Fetch the user's retail wallet
-        Wallet wallet = walletRepository.findByUserId(userId)
+        Wallet wallet = walletRepository.findByUserIdAndWalletType(userId, WalletType.USER_RETAIL)
                 .orElseThrow(() -> new IllegalArgumentException("Retail wallet not found for user ID: " + userId));
 
         // 2. Validate Currency Match
@@ -89,12 +102,51 @@ public class WalletService {
             throw new IllegalStateException("Cannot add funds to a " + wallet.getStatus() + " wallet.");
         }
 
-        // 4. Update balance
-        wallet.setBalance(wallet.getBalance().add(amount));
+        // 4. Create the Top-Up Transaction Record
+        Transaction topUpTx = new Transaction();
+        topUpTx.setSender(wallet.getUser());
+        topUpTx.setSourceWallet(wallet); // Funding comes externally, but lands here
+        topUpTx.setSourceCurrency(currency);
+        topUpTx.setDestinationCurrency(currency);
+        topUpTx.setGrossAmount(amount);
+        topUpTx.setNetAmount(amount);
+        topUpTx.setDestinationAmount(amount);
+        topUpTx.setFxRateApplied(BigDecimal.ONE);
+        topUpTx.setUsdNormalizationRate(BigDecimal.ONE);
+        topUpTx.setGatewayReference(reference);
+        topUpTx.setStatus(TransactionStatus.COMPLETED);
+        topUpTx.setIdempotencyKey(UUID.randomUUID());
 
-        // 5. Save and return DTO
-        Wallet updatedWallet = walletRepository.save(wallet);
-        log.info("Credited {} {} to retail wallet of user ID: {}", amount, currency, userId);
+        transactionRepository.save(topUpTx);
+
+        BigDecimal updatedBalance = wallet.getBalance().add(amount);
+        wallet.setBalance(updatedBalance);
+        walletRepository.save(wallet);
+
+
+
+        // 5. Create the Ledger Entry to trigger the database balance update
+        LedgerEntry depositEntry = LedgerEntry.builder()
+                .transaction(topUpTx)
+                .wallet(wallet)
+                .entryClass(EntryClass.DEPOSIT) // Maps to your SQL CHECK constraint
+                .debit(BigDecimal.ZERO)
+                .credit(amount) // Credit increases retail balance
+                .currency(currency)
+                .description("External Gateway Top-Up: " + reference)
+                .balanceAfter(updatedBalance)
+                .build();
+
+        ledgerEntryRepository.save(depositEntry);
+
+        // 6. Flush and clear so Hibernate fetches the new balance calculated by PostgreSQL
+        entityManager.flush();
+        entityManager.clear();
+
+        // 7. Re-fetch the wallet to return the updated DTO
+        Wallet updatedWallet = walletRepository.findById(wallet.getId()).orElseThrow();
+        log.info("Ledger injected: Credited {} {} to retail wallet of user ID: {}", amount, currency, userId);
+
         return WalletResponse.fromEntity(updatedWallet);
     }
 
@@ -103,41 +155,7 @@ public class WalletService {
      */
     @Transactional
     public WalletResponse mockTopUp(UUID userId, Currency currency, BigDecimal amount) {
-        return addFunds(userId, currency, amount);
-    }
-
-    /**
-     * System Wallet Provisioner / Lookup.
-     * Ensures system operational wallets (SYSTEM_MARKUP, SYSTEM_ROUTING, SYSTEM_LIQUIDITY)
-     * exist for double-entry ledger settlement.
-     */
-    @Transactional
-    public Wallet getOrCreateSystemWallet(WalletType walletType, Currency currency, User systemUser) {
-        if (walletType == WalletType.USER_RETAIL) {
-            throw new IllegalArgumentException("Use createWallet for retail user accounts.");
-        }
-
-        return walletRepository.findByWalletTypeAndCurrency(walletType, currency)
-                .orElseGet(() -> {
-                    log.info("Auto-provisioning missing system wallet: TYPE={}, CURRENCY={}", walletType, currency);
-                    Wallet systemWallet = Wallet.builder()
-                            .user(systemUser)
-                            .walletType(walletType)
-                            .currency(currency)
-                            .balance(BigDecimal.ZERO)
-                            .lockedBalance(BigDecimal.ZERO)
-                            .status(WalletStatus.ACTIVE)
-                            .build();
-                    return walletRepository.save(systemWallet);
-                });
-    }
-
-    /**
-     * Admin query: Paginated fetch of all system wallets.
-     */
-    @Transactional(readOnly = true)
-    public Page<WalletResponse> getAllWallets(Pageable pageable) {
-        return walletRepository.findAll(pageable)
-                .map(WalletResponse::fromEntity);
+        String mockReference = "MOCK-TOPUP-" + System.currentTimeMillis();
+        return addFunds(userId, currency, amount, mockReference);
     }
 }

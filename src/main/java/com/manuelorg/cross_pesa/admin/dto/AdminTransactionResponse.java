@@ -1,4 +1,4 @@
-package com.manuelorg.cross_pesa.auth.admin.dto;
+package com.manuelorg.cross_pesa.admin.dto;
 
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;

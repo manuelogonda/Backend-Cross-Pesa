@@ -3,14 +3,13 @@ package com.manuelorg.cross_pesa.transaction.service;
 import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.beneficiaries.entity.Beneficiary;
 import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
-import com.manuelorg.cross_pesa.notification.dto.TriggerNotificationEvent;
-import com.manuelorg.cross_pesa.notification.enums.NotificationType;
-import com.manuelorg.cross_pesa.rates.dto.FxRateResponse;
+import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
 import com.manuelorg.cross_pesa.rates.service.FxRateService;
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
 import com.manuelorg.cross_pesa.ledger.repository.LedgerEntryRepository;
+import com.manuelorg.cross_pesa.systemEngine.SystemWalletEngine;
+import com.manuelorg.cross_pesa.systemEngine.TransactionFeeEngineService;
 import com.manuelorg.cross_pesa.transaction.dto.QuoteResult;
-import com.manuelorg.cross_pesa.transaction.dto.TransactionResponse;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
 import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
@@ -18,9 +17,9 @@ import com.manuelorg.cross_pesa.transaction.dto.TransactionRequest;
 import com.manuelorg.cross_pesa.transaction.dto.TransactionResponse.ExchangeResponse;
 import com.manuelorg.cross_pesa.transaction.dto.TransactionResponse.SendMoneyResponse;
 import com.manuelorg.cross_pesa.wallet.entity.Wallet;
-import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.enums.WalletType;
 import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -30,7 +29,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -44,13 +42,17 @@ public class TransactionService {
     private final WalletRepository walletRepository;
     private final BeneficiaryRepository beneficiaryRepository;
     private final FxRateService fxRateService;
-    private final LedgerEntryRepository ledgerEntryRepository;
     private final TransactionFeeEngineService feeEngine;
     private final FraudDetectionService fraudDetectionService;
     private final ApplicationEventPublisher eventPublisher;
 
+    // Injected the tools needed for Ledger writes
+    private final SystemWalletEngine systemWalletEngine;
+    private final LedgerEntryRepository ledgerEntryRepository;
+    private final EntityManager entityManager;
+
     /**
-     * 1. PROCESS SEND MONEY (External Remittance)
+     * 1. PROCESS SEND MONEY (External Remittance to Bank/Mobile Money)
      */
     @Transactional
     public SendMoneyResponse processSendMoney(User currentUser, TransactionRequest.SendMoneyRequest request) {
@@ -60,7 +62,6 @@ public class TransactionService {
             throw new IllegalStateException("Duplicate transaction detected.");
         }
 
-        // Fetch Source Wallet (Using ID from DTO) & Verify Ownership
         Wallet sourceWallet = walletRepository.findById(request.sourceWalletId())
                 .orElseThrow(() -> new IllegalArgumentException("Source wallet not found"));
 
@@ -71,20 +72,16 @@ public class TransactionService {
         Beneficiary beneficiary = beneficiaryRepository.findById(request.beneficiaryId())
                 .orElseThrow(() -> new IllegalArgumentException("Beneficiary not found"));
 
-        // Get Live FX Rates (Convert Enum to String using .name())
+        // Get Live FX Rates
         BigDecimal usdToSourceRate = fxRateService.getLiveQuote("USD", request.sourceCurrency().name()).exchangeRate();
         BigDecimal sourceToDestRate = fxRateService.getLiveQuote(request.sourceCurrency().name(), request.destinationCurrency().name()).exchangeRate();
 
-        // Run the Fee Engine
+        // Run Pricing Engine
         QuoteResult quote = feeEngine.calculateTransaction(
-                request.amount(),
-                request.sourceCurrency().name(),
-                request.destinationCurrency().name(),
-                usdToSourceRate,
-                sourceToDestRate
+                request.amount(), request.sourceCurrency().name(), request.destinationCurrency().name(),
+                usdToSourceRate, sourceToDestRate
         );
 
-        // Balance Check against the Gross Amount
         if (sourceWallet.getAvailableBalance().compareTo(quote.amountSent()) < 0) {
             throw new IllegalStateException("Insufficient funds. Available: " + sourceWallet.getAvailableBalance());
         }
@@ -93,7 +90,7 @@ public class TransactionService {
                 currentUser.getId(), request.amount(), request.sourceCurrency())
                 ? TransactionStatus.FLAGGED : TransactionStatus.PROCESSING;
 
-        // Create the Transaction
+        // Create the Parent Transaction
         Transaction transaction = Transaction.builder()
                 .sender(currentUser)
                 .beneficiary(beneficiary)
@@ -116,22 +113,20 @@ public class TransactionService {
 
         Transaction savedTransaction = transactionRepository.save(transaction);
 
-        // Record perfectly balanced double-entry ledger logs
-        recordLedgerEntries(savedTransaction, sourceWallet, null, quote);
+        // DELEGATE to the SystemWalletEngine for the 6-leg outward ledger
+        systemWalletEngine.executeCrossBorderSettlement(
+                savedTransaction, sourceWallet, quote.amountSent(), quote.platformMarkupFee(),
+                quote.routingCostFee(), request.destinationCurrency(), quote.payoutAmountTarget(),
+                quote.routingPair(), quote.markupTiersApplied(), quote.usdBaselineAmount()
+        );
 
-        // Send SMS
-        String smsMessage = String.format("Confirmed. Sent %s %s to %s %s. TxID: %s.",
-                savedTransaction.getSourceCurrency(), savedTransaction.getGrossAmount(),
-                beneficiary.getFirstName(), beneficiary.getLastName(),
-                savedTransaction.getId().toString().substring(0, 8).toUpperCase());
-
-        // eventPublisher.publishEvent(new TriggerNotificationEvent(...)); // Keep your event publisher here
+        log.info("Cross-Border Remittance Sent: {} {} to {}", quote.amountSent(), request.sourceCurrency(), beneficiary.getFirstName());
 
         return SendMoneyResponse.fromEntity(savedTransaction);
     }
 
     /**
-     * 2. PROCESS PEER-TO-PEER (P2P) TRANSFER
+     * 2. PROCESS PEER-TO-PEER (P2P) TRANSFER (Internal Wallet-to-Wallet)
      */
     @Transactional
     public ExchangeResponse processPeerToPeerTransfer(User currentUser, TransactionRequest.ExchangeFundsRequest request) {
@@ -181,94 +176,74 @@ public class TransactionService {
 
         Transaction savedTransaction = transactionRepository.save(transaction);
 
-        // Record perfectly balanced double-entry ledger logs
-        recordLedgerEntries(savedTransaction, sourceWallet, destinationWallet, quote);
+        // Process internal 8-Leg P2P Ledger directly
+        recordP2PLedgerEntries(savedTransaction, sourceWallet, destinationWallet, quote);
 
         return ExchangeResponse.fromEntity(savedTransaction);
     }
 
     /**
      * ===================================================================================
-     * THE DOUBLE-ENTRY LEDGER ENGINE
-     * Ensures Debits exactly equal Credits for every currency involved.
+     * P2P DOUBLE-ENTRY LEDGER ENGINE (8-Leg Sequence)
      * ===================================================================================
      */
-    private void recordLedgerEntries(Transaction tx, Wallet sourceWallet, Wallet destWallet, QuoteResult quote) {
+    private void recordP2PLedgerEntries(Transaction tx, Wallet sourceWallet, Wallet destWallet, QuoteResult quote) {
         List<LedgerEntry> entries = new ArrayList<>();
 
-        // Fetch System Wallets (Requires adding these find methods to your WalletRepository)
-        Wallet systemMarkupWallet = walletRepository.findByWalletTypeAndCurrency(WalletType.SYSTEM_MARKUP, tx.getSourceCurrency())
-                .orElseThrow(() -> new IllegalStateException("Missing System Markup Wallet for " + tx.getSourceCurrency()));
+        Wallet systemMarkup = systemWalletEngine.getSystemWallet(tx.getSourceCurrency(), WalletType.SYSTEM_MARKUP);
+        Wallet systemRouting = systemWalletEngine.getSystemWallet(tx.getSourceCurrency(), WalletType.SYSTEM_ROUTING);
+        Wallet systemLiquiditySource = systemWalletEngine.getSystemWallet(tx.getSourceCurrency(), WalletType.SYSTEM_LIQUIDITY);
+        Wallet systemLiquidityDest = systemWalletEngine.getSystemWallet(tx.getDestinationCurrency(), WalletType.SYSTEM_LIQUIDITY);
 
-        Wallet systemRoutingWallet = walletRepository.findByWalletTypeAndCurrency(WalletType.SYSTEM_ROUTING, tx.getSourceCurrency())
-                .orElseThrow(() -> new IllegalStateException("Missing System Routing Wallet for " + tx.getSourceCurrency()));
+        // 1. DEDUCT from Sender User
+        entries.add(buildEntry(tx, sourceWallet, EntryClass.PRINCIPAL_TRANSFER, quote.amountSent(), BigDecimal.ZERO, quote, "P2P Sent"));
 
-        Wallet systemLiquiditySource = walletRepository.findByWalletTypeAndCurrency(WalletType.SYSTEM_LIQUIDITY, tx.getSourceCurrency())
-                .orElseThrow(() -> new IllegalStateException("Missing System Liquidity Wallet for " + tx.getSourceCurrency()));
-
-        String pair = tx.getSourceCurrency().name() + "_" + tx.getDestinationCurrency().name();
-
-        // ----------------------------------------------------------------
-        // LEG 1: SOURCE CURRENCY BALANCE (Debits = Credits)
-        // ----------------------------------------------------------------
-        // DEBIT 1: Deduct Gross Amount from User
-        entries.add(buildEntry(tx, sourceWallet, "PRINCIPAL_TRANSFER", quote.amountSent(), BigDecimal.ZERO, "Sent to " + pair));
-
-        // CREDIT 1: Platform Profit
         if (quote.platformMarkupFee().compareTo(BigDecimal.ZERO) > 0) {
-            entries.add(buildEntry(tx, systemMarkupWallet, "MARKUP_FEE", BigDecimal.ZERO, quote.platformMarkupFee(), "Margin on " + tx.getId()));
+            entries.add(buildEntry(tx, sourceWallet, EntryClass.MARKUP_FEE, quote.platformMarkupFee(), BigDecimal.ZERO, quote, "P2P Markup"));
+            entries.add(buildEntry(tx, systemMarkup, EntryClass.MARKUP_FEE, BigDecimal.ZERO, quote.platformMarkupFee(), quote, "P2P Margin Credit"));
         }
-
-        // CREDIT 2: Corridor Infrastructure Cost
         if (quote.routingCostFee().compareTo(BigDecimal.ZERO) > 0) {
-            entries.add(buildEntry(tx, systemRoutingWallet, "ROUTING_FEE", BigDecimal.ZERO, quote.routingCostFee(), "Cost for " + pair));
+            entries.add(buildEntry(tx, sourceWallet, EntryClass.ROUTING_FEE, quote.routingCostFee(), BigDecimal.ZERO, quote, "P2P Routing Cost"));
+            entries.add(buildEntry(tx, systemRouting, EntryClass.ROUTING_FEE, BigDecimal.ZERO, quote.routingCostFee(), quote, "P2P Routing Liability"));
         }
 
-        // CREDIT 3: Move Net Funds to AfriPay Liquidity Pool (FX Clearing)
-        entries.add(buildEntry(tx, systemLiquiditySource, "FX_CLEARING", BigDecimal.ZERO, quote.amountAfterFees(), "Inbound FX Clearing"));
+        // 2. Clear Source Currency INTO Liquidity Pool
+        entries.add(buildEntry(tx, systemLiquiditySource, EntryClass.FX_CLEARING, BigDecimal.ZERO, quote.amountAfterFees(), quote, "P2P Inbound Clearing"));
 
-        // ----------------------------------------------------------------
-        // LEG 2: DESTINATION CURRENCY BALANCE (For P2P Only)
-        // ----------------------------------------------------------------
-        if (destWallet != null) {
-            Wallet systemLiquidityDest = walletRepository.findByWalletTypeAndCurrency(WalletType.SYSTEM_LIQUIDITY, tx.getDestinationCurrency())
-                    .orElseThrow(() -> new IllegalStateException("Missing System Liquidity Wallet for " + tx.getDestinationCurrency()));
+        // 3. Clear Target Currency OUT of Liquidity Pool
+        entries.add(buildEntry(tx, systemLiquidityDest, EntryClass.FX_CLEARING, quote.payoutAmountTarget(), BigDecimal.ZERO, quote, "P2P Outbound Clearing"));
 
-            // DEBIT 4: Deduct from AfriPay's Target Currency Pool
-            entries.add(buildEntry(tx, systemLiquidityDest, "FX_CLEARING", quote.payoutAmountTarget(), BigDecimal.ZERO, "Outbound FX Clearing"));
-
-            // CREDIT 4: Credit the Receiver's Wallet
-            entries.add(buildEntry(tx, destWallet, "PRINCIPAL_TRANSFER", BigDecimal.ZERO, quote.payoutAmountTarget(), "Received P2P Transfer"));
-        }
+        // 4. CREDIT to Receiver User
+        entries.add(buildEntry(tx, destWallet, EntryClass.PRINCIPAL_TRANSFER, BigDecimal.ZERO, quote.payoutAmountTarget(), quote, "P2P Received"));
 
         ledgerEntryRepository.saveAll(entries);
+
+        // CRITICAL: Flush to force PostgreSQL triggers to calculate User Balances
+        entityManager.flush();
+        entityManager.clear();
     }
 
-    private LedgerEntry buildEntry(Transaction tx, Wallet wallet, String entryClass, BigDecimal debit, BigDecimal credit, String desc) {
+    private LedgerEntry buildEntry(Transaction tx, Wallet wallet, EntryClass entryClass, BigDecimal debit, BigDecimal credit, QuoteResult quote, String desc) {
         return LedgerEntry.builder()
                 .transaction(tx)
                 .wallet(wallet)
-                .entryClass(entryClass) // Assuming you mapped EntryClass as a String or Enum
+                .entryClass(entryClass) // Maps to the SQL constraint
                 .debit(debit)
                 .credit(credit)
                 .currency(wallet.getCurrency())
                 .description(desc)
-                .usdBaselineAmount(tx.getUsdNormalizationRate()) // Audit tie-back
-                .routingPair(tx.getSourceCurrency().name() + "_" + tx.getDestinationCurrency().name())
+                .usdBaselineAmount(quote.usdBaselineAmount())
+                .routingPair(quote.routingPair())
+                .markupTiersApplied(quote.markupTiersApplied())
                 .build();
     }
-    /**
-     * Retrieves paginated transaction history for the authenticated user.
-     */
+
     @Transactional(readOnly = true)
     public Page<SendMoneyResponse> getUserTransactionHistory(UUID userId, Pageable pageable) {
         return transactionRepository.findBySenderId(userId, pageable)
                 .map(SendMoneyResponse::fromEntity);
     }
 
-    /**
-     * Fetches a single transaction by ID, ensuring ownership validation.
-     */
     @Transactional(readOnly = true)
     public SendMoneyResponse getTransactionById(UUID userId, UUID transactionId) {
         Transaction transaction = transactionRepository.findById(transactionId)
@@ -277,7 +252,6 @@ public class TransactionService {
         if (!transaction.getSender().getId().equals(userId)) {
             throw new SecurityException("Unauthorized access to transaction record.");
         }
-
         return SendMoneyResponse.fromEntity(transaction);
     }
 }

@@ -1,5 +1,6 @@
 package com.manuelorg.cross_pesa.ledger.entity;
 
+import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.wallet.entity.Wallet;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
@@ -26,6 +27,8 @@ public class LedgerEntry {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    // --- RELATIONS ---
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "transaction_id", nullable = false, updatable = false)
     private Transaction transaction;
@@ -34,8 +37,17 @@ public class LedgerEntry {
     @JoinColumn(name = "wallet_id", nullable = false, updatable = false)
     private Wallet wallet;
 
+    // --- ENTRY CLASSIFICATION & CURRENCY ---
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "entry_class", nullable = false, length = 50, updatable = false)
-    private String entryClass; // E.g., 'PRINCIPAL_TRANSFER', 'MARKUP_FEE', 'ROUTING_FEE', 'FX_CLEARING'
+    private EntryClass entryClass;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "currency", nullable = false, length = 3, updatable = false)
+    private Currency currency;
+
+    // --- FINANCIAL AMOUNTS ---
 
     @Builder.Default
     @Column(name = "debit", nullable = false, precision = 18, scale = 4, updatable = false)
@@ -45,16 +57,11 @@ public class LedgerEntry {
     @Column(name = "credit", nullable = false, precision = 18, scale = 4, updatable = false)
     private BigDecimal credit = BigDecimal.ZERO;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "currency", nullable = false, length = 3, updatable = false)
-    private Currency currency;
-
     /**
-     * Calculated and injected by PostgreSQL PL/pgSQL trigger before insert.
-     * @Generated informs Hibernate 6 to refresh this value from the database upon insert.
+     * Set dynamically by PostgreSQL trigger BEFORE INSERT.
+     * We mark this updatable = false to respect the immutability trigger.
      */
-    @org.hibernate.annotations.Generated(event = EventType.INSERT)
-    @Column(name = "balance_after", insertable = false, updatable = false)
+    @Column(name = "balance_after", nullable = false, precision = 18, scale = 4, updatable = false)
     private BigDecimal balanceAfter;
 
     @Column(name = "description", nullable = false, length = 255, updatable = false)
@@ -63,10 +70,10 @@ public class LedgerEntry {
     // --- PRICING ENGINE AUDIT TRAIL ---
 
     @Column(name = "routing_pair", length = 10, updatable = false)
-    private String routingPair; // E.g., 'GBP_KES'
+    private String routingPair;
 
     @Column(name = "markup_tiers_applied", length = 100, updatable = false)
-    private String markupTiersApplied; // E.g., 'TIER_1, TIER_2'
+    private String markupTiersApplied;
 
     @Column(name = "usd_baseline_amount", precision = 18, scale = 4, updatable = false)
     private BigDecimal usdBaselineAmount;
@@ -74,20 +81,4 @@ public class LedgerEntry {
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private OffsetDateTime createdAt;
-
-    /**
-     * Fail-fast Java validation mirroring database constraints before persistence.
-     */
-    @PrePersist
-    protected void validateDebitCreditExclusive() {
-        boolean hasDebit = debit != null && debit.compareTo(BigDecimal.ZERO) > 0;
-        boolean hasCredit = credit != null && credit.compareTo(BigDecimal.ZERO) > 0;
-
-        if (hasDebit && hasCredit) {
-            throw new IllegalStateException("LedgerEntry cannot have both debit and credit greater than zero.");
-        }
-        if (!hasDebit && !hasCredit) {
-            throw new IllegalStateException("LedgerEntry must have either a debit or a credit greater than zero.");
-        }
-    }
 }

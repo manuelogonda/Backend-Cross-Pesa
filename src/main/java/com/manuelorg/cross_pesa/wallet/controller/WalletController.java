@@ -99,16 +99,18 @@ public class WalletController {
             return ResponseEntity.badRequest().body(Map.of("error", "Payment verification failed or amount mismatch."));
         }
 
-        // 3. Deposit funds safely into user's wallet
+        // 3. Deposit funds safely via the Double-Entry Engine
+        // Passing the FLW transaction ID ensures it is recorded as the gateway_reference in the database
         walletService.addFunds(
                 currentUser.getId(),
                 targetCurrency,
-                new BigDecimal(amount)
+                new BigDecimal(amount),
+                "FLW-" + transactionId
         );
 
         return ResponseEntity.ok(Map.of(
                 "status", "SUCCESS",
-                "message", "Wallet funded successfully!"
+                "message", "Wallet funded successfully! Ledger updated."
         ));
     }
 }

@@ -30,6 +30,9 @@ public class TransactionResponse {
             OffsetDateTime createdAt
     ) {
         public static SendMoneyResponse fromEntity(Transaction tx) {
+            String resolvedRef = tx.getGatewayReference() != null ? tx.getGatewayReference()
+                    : (tx.getPayoutReference() != null ? tx.getPayoutReference() : tx.getId().toString());
+
             return new SendMoneyResponse(
                     tx.getId(),
                     tx.getSender().getId(),
@@ -45,7 +48,7 @@ public class TransactionResponse {
                     tx.getDestinationAmount(),
                     tx.getFxRateApplied(),
                     tx.getUsdNormalizationRate(),
-                    tx.getGatewayReference() != null ? tx.getGatewayReference() : tx.getPayoutReference(),
+                    resolvedRef,
                     tx.getStatus().name(),
                     tx.getCreatedAt()
             );
@@ -75,6 +78,8 @@ public class TransactionResponse {
             OffsetDateTime createdAt
     ) {
         public static ExchangeResponse fromEntity(Transaction tx) {
+            String resolvedRef = tx.getGatewayReference() != null ? tx.getGatewayReference() : "P2P-INTERNAL";
+
             return new ExchangeResponse(
                     tx.getId(),
                     tx.getSender().getId(),
@@ -90,7 +95,7 @@ public class TransactionResponse {
                     tx.getDestinationAmount(),
                     tx.getFxRateApplied(),
                     tx.getUsdNormalizationRate(),
-                    tx.getGatewayReference() != null ? tx.getGatewayReference() : "P2P-INTERNAL",
+                    resolvedRef,
                     tx.getStatus().name(),
                     tx.getCreatedAt()
             );

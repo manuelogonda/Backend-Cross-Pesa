@@ -27,8 +27,8 @@ public class Wallet {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true) // Allow nulls for System Wallets
+    @JoinColumn(name = "user_id", nullable = true)      // Match the SQL schema
     private User user;
 
     @Builder.Default

@@ -1,6 +1,7 @@
 package com.manuelorg.cross_pesa.ledger.dto;
 
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
+import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -10,27 +11,28 @@ public record LedgerEntryResponse(
         UUID id,
         UUID transactionId,
         UUID walletId,
-        String entryClass,
+        EntryClass entryClass,
         BigDecimal debit,
         BigDecimal credit,
-        String currency,
+        BigDecimal amount,        // Net impact (credit - debit)
         BigDecimal balanceAfter,
+        String currency,
         String description,
         OffsetDateTime createdAt
 ) {
-    /**
-     * Maps a LedgerEntry entity into an immutable DTO.
-     */
     public static LedgerEntryResponse fromEntity(LedgerEntry entry) {
+        BigDecimal netImpact = entry.getCredit().subtract(entry.getDebit());
+
         return new LedgerEntryResponse(
                 entry.getId(),
-                entry.getTransaction() != null ? entry.getTransaction().getId() : null,
-                entry.getWallet() != null ? entry.getWallet().getId() : null,
+                entry.getTransaction().getId(),
+                entry.getWallet().getId(),
                 entry.getEntryClass(),
                 entry.getDebit(),
                 entry.getCredit(),
-                entry.getCurrency() != null ? entry.getCurrency().name() : null,
+                netImpact,
                 entry.getBalanceAfter(),
+                entry.getCurrency().name(),
                 entry.getDescription(),
                 entry.getCreatedAt()
         );

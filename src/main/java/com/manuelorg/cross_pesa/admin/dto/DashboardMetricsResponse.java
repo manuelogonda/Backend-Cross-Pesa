@@ -1,4 +1,4 @@
-package com.manuelorg.cross_pesa.auth.admin.dto;
+package com.manuelorg.cross_pesa.admin.dto;
 
 import java.math.BigDecimal;
 
