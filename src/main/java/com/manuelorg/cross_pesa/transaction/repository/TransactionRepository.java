@@ -67,4 +67,10 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
             @Param("since") OffsetDateTime since,
             @Param("status") TransactionStatus status
     );
+
+
+    Page<Transaction> findByStatus(TransactionStatus status, Pageable pageable);
+
+    @Query("SELECT SUM(t.totalFee) FROM Transaction t WHERE t.createdAt >= :date")
+    BigDecimal sumTotalFeeByCreatedAtAfter(@Param("date") OffsetDateTime date);
 }

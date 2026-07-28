@@ -1,5 +1,6 @@
 package com.manuelorg.cross_pesa.admin.controller;
 
+import com.manuelorg.cross_pesa.admin.dto.AdminUserDto;
 import com.manuelorg.cross_pesa.admin.service.AdminUserOpsService;
 import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.ledger.dto.LedgerEntryResponse;
@@ -52,5 +53,16 @@ public class AdminUserOpsController {
                 "message", "Wallet status updated successfully",
                 "wallet", updatedWallet
         ));
+    }
+
+    @PutMapping("/{userId}/kyc")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> updateKycStatus(
+            @PathVariable UUID userId,
+            @RequestBody AdminUserDto.UpdateKycRequest request,
+            @AuthenticationPrincipal User adminUser
+    ) {
+        userOpsService.updateUserKyc(userId, request, adminUser);
+        return ResponseEntity.ok().build();
     }
 }
