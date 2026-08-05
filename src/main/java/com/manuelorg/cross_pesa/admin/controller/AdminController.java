@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminController {
 
-    private final AdminDashboardService adminDashboardService; // Inject your metrics/transactions/users service
+    private final AdminDashboardService adminDashboardService;
 
     @GetMapping("/metrics")
     public ResponseEntity<DashboardMetricsResponse> getMetrics() {

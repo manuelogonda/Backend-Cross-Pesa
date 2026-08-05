@@ -11,11 +11,16 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface TransactionRepository extends JpaRepository<Transaction, UUID> {
+
+    //cron job worker
+
+    List<Transaction> findByStatusIn(List<TransactionStatus> statuses, Pageable batchLimit);
 
     // --- IDEMPOTENCY & LOOKUPS ---
 
@@ -47,6 +52,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
     long countByStatus(TransactionStatus status);
 
     long countByCreatedAtAfter(OffsetDateTime date);
+
+    long countByStatusIn(List<TransactionStatus> statuses);
 
     /**
      * Calculates Gross Revenue (Total Fees collected).

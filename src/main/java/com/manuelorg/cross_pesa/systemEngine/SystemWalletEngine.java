@@ -9,6 +9,7 @@ import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
 import com.manuelorg.cross_pesa.wallet.enums.WalletType;
 import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import jakarta.persistence.EntityManager;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -25,7 +27,16 @@ public class SystemWalletEngine {
 
     private final WalletRepository walletRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
-    private final EntityManager entityManager; // ADDED: Directly clears Hibernate cache constraints
+    private final EntityManager entityManager;
+
+    @PostConstruct
+    public void init() {
+        try {
+            initializeSystemWallets();
+        } catch (Exception e) {
+            log.error("Failed to auto-initialize system wallets on startup", e);
+        }
+    }
 
     private static final List<Currency> SUPPORTED_CURRENCIES = List.of(
             Currency.KES, Currency.USD, Currency.CNY, Currency.JPY,
@@ -50,7 +61,7 @@ public class SystemWalletEngine {
                     Wallet newSysWallet = Wallet.builder()
                             .currency(currency)
                             .walletType(type)
-                            .balance(BigDecimal.ZERO) // Fixed: mapped to your 'balance' table field
+                            .balance(BigDecimal.ZERO)
                             .lockedBalance(BigDecimal.ZERO)
                             .status(WalletStatus.ACTIVE)
                             .build();
@@ -61,12 +72,22 @@ public class SystemWalletEngine {
 
     public Wallet getSystemWallet(Currency currency, WalletType type) {
         return walletRepository.findByCurrencyAndWalletType(currency, type)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Critical Treasury Error: Missing system wallet [" + type + "] for " + currency));
+                .orElseGet(() -> {
+                    log.warn("System wallet [{}] for {} was missing. Auto-provisioning on-demand.", type, currency);
+                    Wallet newSysWallet = Wallet.builder()
+                            .currency(currency)
+                            .walletType(type)
+                            .balance(BigDecimal.ZERO)
+                            .lockedBalance(BigDecimal.ZERO)
+                            .status(WalletStatus.ACTIVE)
+                            .build();
+                    return walletRepository.save(newSysWallet);
+                });
     }
 
     /**
-     * FIXED: Includes Pricing Engine Audit attributes.
+     * Executes cross-border settlement, updates wallet balances explicitly,
+     * and writes fully audited immutable ledger legs with balance_after tracking.
      */
     @Transactional
     public void executeCrossBorderSettlement(
@@ -77,57 +98,87 @@ public class SystemWalletEngine {
             BigDecimal routingFee,
             Currency targetCurrency,
             BigDecimal targetPayoutAmount,
-            // AUDIT TRAIL EXTRACTION INPUTS
             String routingPair,
             String tiersApplied,
             BigDecimal usdBaseline) {
 
         Currency sourceCurrency = userSourceWallet.getCurrency();
+
+        // 1. Lock all participating wallets to prevent race conditions during concurrent settlements
+        Wallet lockedUserWallet = lockAndGetWallet(userSourceWallet.getId());
+        Wallet markupWallet = lockAndGetWallet(getSystemWallet(sourceCurrency, WalletType.SYSTEM_MARKUP).getId());
+        Wallet routingWallet = lockAndGetWallet(getSystemWallet(sourceCurrency, WalletType.SYSTEM_ROUTING).getId());
+        Wallet sourceLiquidityWallet = lockAndGetWallet(getSystemWallet(sourceCurrency, WalletType.SYSTEM_LIQUIDITY).getId());
+        Wallet targetLiquidityWallet = lockAndGetWallet(getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY).getId());
+
         List<LedgerEntry> entries = new ArrayList<>();
 
-        // --- USER DEBITS ---
-        entries.add(buildLeg(transaction, userSourceWallet, EntryClass.PRINCIPAL_TRANSFER, principal, BigDecimal.ZERO,
-                sourceCurrency, "Outbound remittance principal", routingPair, tiersApplied, usdBaseline));
+        // --- 2. CALCULATE NEW BALANCES & BUILD USER DEBITS ---
+        // Total debit from user = principal + markupFee + routingFee
+        BigDecimal totalUserDebit = principal.add(markupFee).add(routingFee);
+        if (lockedUserWallet.getWalletType() == WalletType.USER_RETAIL && lockedUserWallet.getBalance().compareTo(totalUserDebit) < 0) {
+            throw new IllegalStateException(String.format("Insufficient funds for user wallet ID %s. Balance: %s, Required: %s",
+                    lockedUserWallet.getId(), lockedUserWallet.getBalance(), totalUserDebit));
+        }
+
+        BigDecimal userNewBalance = lockedUserWallet.getBalance().subtract(totalUserDebit);
+
+        // Individual itemized legs for the user wallet
+        entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.PRINCIPAL_TRANSFER, principal, BigDecimal.ZERO,
+                sourceCurrency, "Outbound remittance principal", routingPair, tiersApplied, usdBaseline, userNewBalance));
 
         if (markupFee.compareTo(BigDecimal.ZERO) > 0) {
-            entries.add(buildLeg(transaction, userSourceWallet, EntryClass.MARKUP_FEE, markupFee, BigDecimal.ZERO,
-                    sourceCurrency, "Deducting platform profit", routingPair, tiersApplied, usdBaseline));
+            entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.MARKUP_FEE, markupFee, BigDecimal.ZERO,
+                    sourceCurrency, "Deducting platform profit", routingPair, tiersApplied, usdBaseline, userNewBalance));
         }
 
         if (routingFee.compareTo(BigDecimal.ZERO) > 0) {
-            entries.add(buildLeg(transaction, userSourceWallet, EntryClass.ROUTING_FEE, routingFee, BigDecimal.ZERO,
-                    sourceCurrency, "Deducting banking corridor cost", routingPair, tiersApplied, usdBaseline));
+            entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.ROUTING_FEE, routingFee, BigDecimal.ZERO,
+                    sourceCurrency, "Deducting banking corridor cost", routingPair, tiersApplied, usdBaseline, userNewBalance));
         }
 
-        // --- SYSTEM CREDITS & PAYOUTS ---
+        lockedUserWallet.setBalance(userNewBalance);
+
+        // --- 3. SYSTEM REVENUE CREDITS ---
         if (markupFee.compareTo(BigDecimal.ZERO) > 0) {
-            Wallet markupWallet = getSystemWallet(sourceCurrency, WalletType.SYSTEM_MARKUP);
+            BigDecimal markupNewBalance = markupWallet.getBalance().add(markupFee);
             entries.add(buildLeg(transaction, markupWallet, EntryClass.MARKUP_FEE, BigDecimal.ZERO, markupFee,
-                    sourceCurrency, "Crediting platform pure profit", routingPair, tiersApplied, usdBaseline));
+                    sourceCurrency, "Crediting platform pure profit", routingPair, tiersApplied, usdBaseline, markupNewBalance));
+            markupWallet.setBalance(markupNewBalance);
         }
 
         if (routingFee.compareTo(BigDecimal.ZERO) > 0) {
-            Wallet routingWallet = getSystemWallet(sourceCurrency, WalletType.SYSTEM_ROUTING);
+            BigDecimal routingNewBalance = routingWallet.getBalance().add(routingFee);
             entries.add(buildLeg(transaction, routingWallet, EntryClass.ROUTING_FEE, BigDecimal.ZERO, routingFee,
-                    sourceCurrency, "Crediting money to pay external banks", routingPair, tiersApplied, usdBaseline));
+                    sourceCurrency, "Crediting money to pay external banks", routingPair, tiersApplied, usdBaseline, routingNewBalance));
+            routingWallet.setBalance(routingNewBalance);
         }
 
-        Wallet targetLiquidityWallet = getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY);
-        entries.add(buildLeg(transaction, targetLiquidityWallet, EntryClass.FX_CLEARING, targetPayoutAmount, BigDecimal.ZERO,
-                targetCurrency, "Local float payout to beneficiary", routingPair, tiersApplied, usdBaseline));
+        // --- 4. FX CLEARING POOLS (Source out, Target in) ---
+        BigDecimal totalSourceClearingAmount = principal.subtract(routingFee);
+        BigDecimal sourceLiquidityNewBalance = sourceLiquidityWallet.getBalance().add(totalSourceClearingAmount);
+        entries.add(buildLeg(transaction, sourceLiquidityWallet, EntryClass.FX_CLEARING, BigDecimal.ZERO, totalSourceClearingAmount,
+                sourceCurrency, "Inbound clearing float lock", routingPair, tiersApplied, usdBaseline, sourceLiquidityNewBalance));
+        sourceLiquidityWallet.setBalance(sourceLiquidityNewBalance);
 
-        // Save everything atomically
+        BigDecimal targetLiquidityNewBalance = targetLiquidityWallet.getBalance().subtract(targetPayoutAmount);
+        // Note: For target liquidity disbursement, it acts as a credit/outflow from pool perspective or tracking pool depth
+        entries.add(buildLeg(transaction, targetLiquidityWallet, EntryClass.FX_CLEARING, targetPayoutAmount, BigDecimal.ZERO,
+                targetCurrency, "Local float payout to beneficiary", routingPair, tiersApplied, usdBaseline, targetLiquidityNewBalance));
+        targetLiquidityWallet.setBalance(targetLiquidityNewBalance);
+
+        // 5. Persist updated balances and append full double-entry transaction block
+        walletRepository.saveAll(List.of(lockedUserWallet, markupWallet, routingWallet, sourceLiquidityWallet, targetLiquidityWallet));
         ledgerEntryRepository.saveAll(entries);
 
-        // CRITICAL FIX: Flush changes and evict from cache so Hibernate reads trigger calculations!
         entityManager.flush();
         entityManager.clear();
 
-        log.info("Executed 6-leg balanced settlement for Transaction: {}", transaction.getId());
+        log.info("Executed balanced settlement for Transaction: {}", transaction.getId());
     }
 
     /**
-     * SCENARIO C FIXED: Uses valid 'DEPOSIT' / 'WITHDRAWAL' strings matching your CHECK constraints.
+     * Executes treasury rebalancing between system liquidity wallets with explicit cache updates.
      */
     @Transactional
     public void executeTreasuryRebalance(
@@ -138,17 +189,28 @@ public class SystemWalletEngine {
             BigDecimal depositAmount,
             String adminNotes) {
 
-        Wallet sourceLiquidity = getSystemWallet(sourceCurrency, WalletType.SYSTEM_LIQUIDITY);
-        Wallet targetLiquidity = getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY);
+        Wallet sourceLiquidity = lockAndGetWallet(getSystemWallet(sourceCurrency, WalletType.SYSTEM_LIQUIDITY).getId());
+        Wallet targetLiquidity = lockAndGetWallet(getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY).getId());
+
+        if (sourceLiquidity.getBalance().compareTo(withdrawAmount) < 0) {
+            throw new IllegalStateException("Insufficient source liquidity for treasury rebalance.");
+        }
+
+        BigDecimal sourceNewBalance = sourceLiquidity.getBalance().subtract(withdrawAmount);
+        BigDecimal targetNewBalance = targetLiquidity.getBalance().add(depositAmount);
+
+        sourceLiquidity.setBalance(sourceNewBalance);
+        targetLiquidity.setBalance(targetNewBalance);
 
         List<LedgerEntry> rebalanceEntries = new ArrayList<>();
 
         rebalanceEntries.add(buildLeg(adminTransaction, sourceLiquidity, EntryClass.WITHDRAWAL, withdrawAmount, BigDecimal.ZERO,
-                sourceCurrency, "Admin withdrawal: " + adminNotes, "TREASURY", "NONE", withdrawAmount));
+                sourceCurrency, "Admin withdrawal: " + adminNotes, "TREASURY", "NONE", withdrawAmount, sourceNewBalance));
 
         rebalanceEntries.add(buildLeg(adminTransaction, targetLiquidity, EntryClass.DEPOSIT, BigDecimal.ZERO, depositAmount,
-                targetCurrency, "Admin deposit: " + adminNotes, "TREASURY", "NONE", withdrawAmount));
+                targetCurrency, "Admin deposit: " + adminNotes, "TREASURY", "NONE", withdrawAmount, targetNewBalance));
 
+        walletRepository.saveAll(List.of(sourceLiquidity, targetLiquidity));
         ledgerEntryRepository.saveAll(rebalanceEntries);
 
         entityManager.flush();
@@ -157,10 +219,15 @@ public class SystemWalletEngine {
         log.info("Treasury Rebalanced: -{} {} -> +{} {}", withdrawAmount, sourceCurrency, depositAmount, targetCurrency);
     }
 
+    private Wallet lockAndGetWallet(UUID walletId) {
+        return walletRepository.findByIdWithLock(walletId)
+                .orElseThrow(() -> new IllegalArgumentException("Wallet not found with ID: " + walletId));
+    }
+
     private LedgerEntry buildLeg(
             Transaction tx, Wallet wallet, EntryClass entryClass,
             BigDecimal debit, BigDecimal credit, Currency currency, String desc,
-            String routingPair, String tiersApplied, BigDecimal usdBaseline) {
+            String routingPair, String tiersApplied, BigDecimal usdBaseline, BigDecimal balanceAfter) {
 
         return LedgerEntry.builder()
                 .transaction(tx)
@@ -173,6 +240,7 @@ public class SystemWalletEngine {
                 .routingPair(routingPair)
                 .markupTiersApplied(tiersApplied)
                 .usdBaselineAmount(usdBaseline)
+                .balanceAfter(balanceAfter)
                 .build();
     }
 }

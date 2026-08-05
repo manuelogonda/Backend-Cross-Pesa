@@ -81,10 +81,10 @@ public class KycService {
         boolean hasPending = kycRepository.findByUserIdOrderByCreatedAtDesc(user.getId())
                 .stream()
                 .anyMatch(sub -> sub.getStatus().equals("PENDING"));
-
-        if (hasPending) {
-            throw new IllegalStateException("You already have a KYC submission under review.");
-        }
+// TEMPORARILY COMMENTED OUT FOR FRONTEND TESTING
+//        if (hasPending) {
+//            throw new IllegalStateException("You already have a KYC submission under review.");
+//        }
 
         KycSubmission submission = KycSubmission.builder()
                 .user(user)

@@ -13,10 +13,10 @@ import java.util.UUID;
 
 public interface FxRepository extends JpaRepository<FxRate, UUID> {
 
-    @Query("SELECT f FROM FxRate f WHERE f.sourceCurrency = :source AND f.destinationCurrency = :dest AND f.expiresAt > :now ORDER BY f.expiresAt DESC LIMIT 1")
-    Optional<FxRate> findActiveRate(
-            @Param("source") String sourceCurrency,
-            @Param("dest") String destinationCurrency,
-            @Param("now") OffsetDateTime now
+    // Spring Data automatically translates this to SELECT ... ORDER BY expiresAt DESC LIMIT 1 (or equivalent dialect)
+    Optional<FxRate> findFirstBySourceCurrencyAndDestinationCurrencyAndExpiresAtAfterOrderByExpiresAtDesc(
+            String sourceCurrency,
+            String destinationCurrency,
+            OffsetDateTime now
     );
 }

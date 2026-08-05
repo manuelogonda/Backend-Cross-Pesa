@@ -6,6 +6,7 @@ import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.ledger.dto.LedgerEntryResponse;
 import com.manuelorg.cross_pesa.wallet.dto.WalletResponse;
 import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,18 +21,17 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/admin/users")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')") 
 public class AdminUserOpsController {
 
     private final AdminUserOpsService userOpsService;
 
     @GetMapping("/{userId}/wallet")
-    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<WalletResponse> getUserWallet(@PathVariable UUID userId) {
         return ResponseEntity.ok(userOpsService.getUserRetailWallet(userId));
     }
 
     @GetMapping("/{userId}/ledger")
-    @PreAuthorize("hasAnyRole('ADMIN')")
     public ResponseEntity<Page<LedgerEntryResponse>> getUserLedger(
             @PathVariable UUID userId,
             Pageable pageable
@@ -40,14 +40,16 @@ public class AdminUserOpsController {
     }
 
     @PostMapping("/{userId}/wallet/status")
-    @PreAuthorize("hasRole('ADMIN')") // Only compliance can freeze accounts
     public ResponseEntity<Map<String, Object>> changeWalletStatus(
             @PathVariable UUID userId,
-            @RequestBody Map<String, String> payload,
+            @Valid @RequestBody AdminUserDto.UpdateStatusRequest request, // 👈 Replaced raw Map with typed DTO
             @AuthenticationPrincipal User adminUser
     ) {
-        WalletStatus newStatus = WalletStatus.valueOf(payload.get("status").toUpperCase());
-        WalletResponse updatedWallet = userOpsService.updateWalletStatus(userId, newStatus, adminUser.getEmail());
+        WalletResponse updatedWallet = userOpsService.updateWalletStatus(
+                userId,
+                request.status(),
+                adminUser.getEmail()
+        );
 
         return ResponseEntity.ok(Map.of(
                 "message", "Wallet status updated successfully",
@@ -56,10 +58,9 @@ public class AdminUserOpsController {
     }
 
     @PutMapping("/{userId}/kyc")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> updateKycStatus(
             @PathVariable UUID userId,
-            @RequestBody AdminUserDto.UpdateKycRequest request,
+            @Valid @RequestBody AdminUserDto.UpdateKycRequest request,
             @AuthenticationPrincipal User adminUser
     ) {
         userOpsService.updateUserKyc(userId, request, adminUser);

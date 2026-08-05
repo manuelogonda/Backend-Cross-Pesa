@@ -4,9 +4,11 @@ import com.manuelorg.cross_pesa.wallet.entity.Wallet;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
 import com.manuelorg.cross_pesa.wallet.enums.WalletType;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -37,6 +39,15 @@ public interface WalletRepository extends JpaRepository<Wallet, UUID> {
      * Checks if a user already owns a specific type of wallet before creation.
      */
     boolean existsByUserIdAndWalletType(UUID userId, WalletType walletType);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT w FROM Wallet w WHERE w.user.id = :userId AND w.walletType = :walletType")
+    Optional<Wallet> findByUserIdAndWalletTypeWithLock(@Param("userId") UUID userId, @Param("walletType") WalletType walletType);
+
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT w FROM Wallet w WHERE w.id = :walletId")
+    Optional<Wallet> findByIdWithLock(@Param("walletId") UUID walletId);
 
     // --- SYSTEM & OPERATIONAL WALLETS (For Double-Entry Ledger) ---
 

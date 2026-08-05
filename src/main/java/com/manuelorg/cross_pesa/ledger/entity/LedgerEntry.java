@@ -61,8 +61,9 @@ public class LedgerEntry {
      * Set dynamically by PostgreSQL trigger BEFORE INSERT.
      * We mark this updatable = false to respect the immutability trigger.
      */
-    @Column(name = "balance_after", nullable = false, precision = 18, scale = 4, updatable = false)
-    private BigDecimal balanceAfter;
+    @Column(name = "balance_after", nullable = false, precision = 18, scale = 4)
+    @org.hibernate.annotations.Generated
+    private BigDecimal balanceAfter = BigDecimal.ZERO;
 
     @Column(name = "description", nullable = false, length = 255, updatable = false)
     private String description;

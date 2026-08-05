@@ -39,9 +39,9 @@ public class FxRateService {
         OffsetDateTime now = OffsetDateTime.now();
 
         // 1. Check database for an active, unexpired rate
-        FxRate activeRate = fxRateRepository.findActiveRate(sourceCurrency, destinationCurrency, now)
-                .orElseGet(() -> fetchAndCalculateCrossRate(sourceCurrency, destinationCurrency, now));
-
+        FxRate activeRate = fxRateRepository.findFirstBySourceCurrencyAndDestinationCurrencyAndExpiresAtAfterOrderByExpiresAtDesc(
+                sourceCurrency, destinationCurrency, now
+        ).orElseGet(() -> fetchAndCalculateCrossRate(sourceCurrency, destinationCurrency, now));
         return FxRateResponse.fromEntity(activeRate);
     }
 
@@ -52,22 +52,26 @@ public class FxRateService {
         log.info("Cache miss. Fetching OpenExchangeRates to calculate {} -> {}", sourceCurrency, destinationCurrency);
 
         // Fetch the raw JSON map from Open Exchange Rates (Base is strictly USD)
-        // Response format: { "base": "USD", "rates": { "GBP": 0.78, "KES": 130.0 } }
         OpenExchangeRatesResponse response = openExchangeRatesClient.getLatestRates();
 
-        BigDecimal sourceRateFromUsd = response.rates().get(sourceCurrency);
-        BigDecimal destRateFromUsd = response.rates().get(destinationCurrency);
+        // Open Exchange Rates free tier omits "USD": 1.0 from the map, so handle it explicitly
+        BigDecimal sourceRateFromUsd = sourceCurrency.equals("USD")
+                ? BigDecimal.ONE
+                : response.rates().get(sourceCurrency);
+
+        BigDecimal destRateFromUsd = destinationCurrency.equals("USD")
+                ? BigDecimal.ONE
+                : response.rates().get(destinationCurrency);
 
         if (sourceRateFromUsd == null || destRateFromUsd == null) {
-            throw new IllegalArgumentException("Unsupported currency pair requested.");
+            throw new IllegalArgumentException("Unsupported currency pair requested: " + sourceCurrency + " -> " + destinationCurrency);
         }
 
         // --- CROSS RATE MATH ---
         // To find GBP -> KES, you divide (USD -> KES) by (USD -> GBP)
-        // Example: 130.0 / 0.78 = 166.666667
         BigDecimal calculatedRate = destRateFromUsd.divide(sourceRateFromUsd, 6, RoundingMode.HALF_UP);
 
-        // 2. Save the rate to the database with a Time-To-Live (TTL)
+        // Save the rate to the database with a Time-To-Live (TTL)
         FxRate newRate = FxRate.builder()
                 .sourceCurrency(sourceCurrency)
                 .destinationCurrency(destinationCurrency)
@@ -78,7 +82,6 @@ public class FxRateService {
 
         return fxRateRepository.save(newRate);
     }
-
     /**
      * Fetches a paginated history of exchange rates stored in the database.
      */

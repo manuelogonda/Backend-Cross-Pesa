@@ -21,18 +21,20 @@ public record LedgerEntryResponse(
         OffsetDateTime createdAt
 ) {
     public static LedgerEntryResponse fromEntity(LedgerEntry entry) {
-        BigDecimal netImpact = entry.getCredit().subtract(entry.getDebit());
+        BigDecimal netImpact = entry.getCredit() != null && entry.getDebit() != null
+                ? entry.getCredit().subtract(entry.getDebit())
+                : BigDecimal.ZERO;
 
         return new LedgerEntryResponse(
                 entry.getId(),
-                entry.getTransaction().getId(),
-                entry.getWallet().getId(),
+                entry.getTransaction() != null ? entry.getTransaction().getId() : null,
+                entry.getWallet() != null ? entry.getWallet().getId() : null,
                 entry.getEntryClass(),
-                entry.getDebit(),
-                entry.getCredit(),
+                entry.getDebit() != null ? entry.getDebit() : BigDecimal.ZERO,
+                entry.getCredit() != null ? entry.getCredit() : BigDecimal.ZERO,
                 netImpact,
-                entry.getBalanceAfter(),
-                entry.getCurrency().name(),
+                entry.getBalanceAfter() != null ? entry.getBalanceAfter() : BigDecimal.ZERO,
+                entry.getCurrency() != null ? entry.getCurrency().name() : "USD",
                 entry.getDescription(),
                 entry.getCreatedAt()
         );

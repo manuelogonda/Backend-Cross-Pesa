@@ -25,7 +25,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
-    private final WalletService walletService;
+
 
     public AuthResponse register(RegisterRequest request) {
         // RECORD syntax: request.email()
@@ -49,11 +49,8 @@ public class AuthService {
 
         User savedUser = repository.save(user);
 
-        Currency selectedCurrency = request.currency() != null ? request.currency() : Currency.KES;
-        walletService.createWallet(savedUser, selectedCurrency);
-
-        var accessToken = jwtService.generateAccessToken(user);
-        var refreshToken = jwtService.generateRefreshToken(user);
+        var accessToken = jwtService.generateAccessToken(savedUser);
+        var refreshToken = jwtService.generateRefreshToken(savedUser);
 
         return AuthResponse.builder()
                 .accessToken(accessToken)

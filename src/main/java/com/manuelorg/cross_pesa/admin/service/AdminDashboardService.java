@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -29,10 +30,14 @@ public class AdminDashboardService {
         OffsetDateTime startOfDay = LocalDate.now().atStartOfDay().atOffset(ZoneOffset.UTC);
 
         long totalTransactionsToday = transactionRepository.countByCreatedAtAfter(startOfDay);
-        long pendingTransactions = transactionRepository.countByStatus(TransactionStatus.PROCESSING);
+
+        // Count both PENDING and PROCESSING statuses for an accurate dashboard view
+        long pendingTransactions = transactionRepository.countByStatusIn(
+                List.of(TransactionStatus.PROCESSING, TransactionStatus.PENDING)
+        );
+
         long flaggedTransactions = transactionRepository.countByStatus(TransactionStatus.FLAGGED);
 
-        // Sum total revenue (fees collected) today
         BigDecimal totalRevenueToday = transactionRepository.sumTotalFeeByCreatedAtAfter(startOfDay);
         if (totalRevenueToday == null) {
             totalRevenueToday = BigDecimal.ZERO;

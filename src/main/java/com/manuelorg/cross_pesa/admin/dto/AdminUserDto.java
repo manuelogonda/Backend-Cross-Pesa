@@ -2,6 +2,7 @@ package com.manuelorg.cross_pesa.admin.dto;
 
 import com.manuelorg.cross_pesa.auth.entity.KycStatus;
 import com.manuelorg.cross_pesa.auth.entity.UserStatus;
+import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -23,7 +24,7 @@ public class AdminUserDto {
     ) {}
 
     public record UpdateStatusRequest(
-            UserStatus status,
+            WalletStatus status,
             String reason // Keep an audit trail of why an admin suspended someone
     ) {}
 

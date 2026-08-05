@@ -7,6 +7,7 @@ import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
 import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
 import com.manuelorg.cross_pesa.wallet.dto.WalletResponse;
+import com.manuelorg.cross_pesa.wallet.entity.Wallet;
 import com.manuelorg.cross_pesa.wallet.enums.WalletType;
 import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
@@ -48,9 +49,13 @@ public class AdminTreasuryService {
                 adminUser.getEmail(), request.withdrawAmount(), request.sourceCurrency(),
                 request.depositAmount(), request.targetCurrency());
 
+        Wallet sourceLiquidity = systemWalletEngine.getSystemWallet(request.sourceCurrency(), WalletType.SYSTEM_LIQUIDITY);
+        Wallet targetLiquidity = systemWalletEngine.getSystemWallet(request.targetCurrency(), WalletType.SYSTEM_LIQUIDITY);
         // Create an audit transaction for the rebalance
         Transaction auditTx = Transaction.builder()
                 .sender(adminUser)
+                .sourceWallet(sourceLiquidity)
+                .destinationWallet(targetLiquidity)
                 .sourceCurrency(request.sourceCurrency())
                 .destinationCurrency(request.targetCurrency())
                 .grossAmount(request.withdrawAmount())

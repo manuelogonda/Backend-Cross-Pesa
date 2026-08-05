@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -31,77 +32,107 @@ public class LedgerService {
 
     /**
      * READ: Fetches the paginated statement for the user's primary retail wallet.
-     * Guaranteed to only fetch records belonging to the authenticated user.
      */
     @Transactional(readOnly = true)
     public Page<LedgerEntryResponse> getWalletStatement(User currentUser, Pageable pageable) {
-        // 1. Fetch the user's single retail wallet using the strict discriminator
         Wallet wallet = walletRepository.findByUserIdAndWalletType(currentUser.getId(), WalletType.USER_RETAIL)
                 .orElseThrow(() -> new IllegalArgumentException("Retail wallet not found for this user."));
 
-        // 2. Fetch and map the paginated ledger entries
         return ledgerEntryRepository.findByWalletIdOrderByCreatedAtDesc(wallet.getId(), pageable)
                 .map(LedgerEntryResponse::fromEntity);
     }
 
     /**
      * WRITE: Records a strict double-entry transfer for simple same-currency movements.
-     * (Note: Complex multi-leg FX transfers are handled directly in TransactionService).
      */
     @Transactional
     public void recordSimpleTransfer(Transaction transaction, Wallet sourceWallet, Wallet targetWallet, BigDecimal amount, EntryClass entryClass, String description) {
-        // 1. Sanity check: Ensure currencies match (Cross-currency requires an FX exchange intermediate step)
         if (sourceWallet.getCurrency() != targetWallet.getCurrency()) {
             throw new IllegalArgumentException("Direct simple transfers must be in the same currency.");
         }
 
-        // 2. Create the DEBIT leg (Money leaving the source)
+        // 1. Lock and fetch fresh wallet states
+        Wallet lockedSource = lockAndGetWallet(sourceWallet.getId());
+        Wallet lockedTarget = lockAndGetWallet(targetWallet.getId());
+
+        // 2. Enforce retail insufficient funds check
+        if (lockedSource.getWalletType() == WalletType.USER_RETAIL && lockedSource.getBalance().compareTo(amount) < 0) {
+            throw new IllegalStateException(String.format("Insufficient funds in wallet %s. Available: %s, Attempted Debit: %s",
+                    lockedSource.getId(), lockedSource.getBalance(), amount));
+        }
+
+        // 3. Calculate new balances
+        BigDecimal sourceNewBalance = lockedSource.getBalance().subtract(amount);
+        BigDecimal targetNewBalance = lockedTarget.getBalance().add(amount);
+
+        // 4. Create DEBIT leg
         LedgerEntry debitEntry = LedgerEntry.builder()
                 .transaction(transaction)
-                .wallet(sourceWallet)
-                .entryClass(entryClass) // Type-safe Enum mapping
+                .wallet(lockedSource)
+                .entryClass(entryClass)
                 .debit(amount)
-                .currency(sourceWallet.getCurrency())
+                .credit(BigDecimal.ZERO)
+                .currency(lockedSource.getCurrency())
+                .balanceAfter(sourceNewBalance)
                 .description(description + " (Outgoing)")
                 .build();
 
-        // 3. Create the CREDIT leg (Money entering the target)
+        // 5. Create CREDIT leg
         LedgerEntry creditEntry = LedgerEntry.builder()
                 .transaction(transaction)
-                .wallet(targetWallet)
-                .entryClass(entryClass) // Type-safe Enum mapping
+                .wallet(lockedTarget)
+                .entryClass(entryClass)
+                .debit(BigDecimal.ZERO)
                 .credit(amount)
-                .currency(targetWallet.getCurrency())
+                .currency(lockedTarget.getCurrency())
+                .balanceAfter(targetNewBalance)
                 .description(description + " (Incoming)")
                 .build();
 
-        // 4. Save both to the ledger.
+        // 6. Update entity cache/database balances
+        lockedSource.setBalance(sourceNewBalance);
+        lockedTarget.setBalance(targetNewBalance);
+        walletRepository.saveAll(List.of(lockedSource, lockedTarget));
+
         ledgerEntryRepository.saveAll(List.of(debitEntry, creditEntry));
 
-        // 5. CRITICAL: Clear Hibernate cache so the PostgreSQL trigger's balance math is fetched next time
         entityManager.flush();
         entityManager.clear();
     }
 
     /**
-     * WRITE: Records a single-leg deposit from an external gateway (like Flutterwave).
-     * Since the actual cash is held at the gateway, we only record the liability (credit) on our platform.
+     * WRITE: Records a single-leg deposit from an external gateway.
      */
     @Transactional
     public void recordGatewayDeposit(Transaction transaction, Wallet targetWallet, BigDecimal amount, String description) {
+        Wallet lockedTarget = lockAndGetWallet(targetWallet.getId());
+
+        BigDecimal newBalance = lockedTarget.getBalance().add(amount);
+
         LedgerEntry depositEntry = LedgerEntry.builder()
                 .transaction(transaction)
-                .wallet(targetWallet)
-                .entryClass(EntryClass.DEPOSIT) // Type-safe Enum mapping
+                .wallet(lockedTarget)
+                .entryClass(EntryClass.DEPOSIT)
+                .debit(BigDecimal.ZERO)
                 .credit(amount)
-                .currency(targetWallet.getCurrency())
+                .currency(lockedTarget.getCurrency())
+                .balanceAfter(newBalance)
                 .description(description)
                 .build();
 
+        lockedTarget.setBalance(newBalance);
+        walletRepository.save(lockedTarget);
         ledgerEntryRepository.save(depositEntry);
 
-        // CRITICAL: Clear Hibernate cache
         entityManager.flush();
         entityManager.clear();
+    }
+
+    /**
+     * Helper to fetch a wallet with a pessimistic write lock to prevent race conditions.
+     */
+    private Wallet lockAndGetWallet(UUID walletId) {
+        return walletRepository.findByIdWithLock(walletId)
+                .orElseThrow(() -> new IllegalArgumentException("Wallet not found with ID: " + walletId));
     }
 }

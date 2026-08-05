@@ -135,7 +135,8 @@ public class TransactionService {
             throw new IllegalStateException("Duplicate transaction detected.");
         }
 
-        Wallet sourceWallet = walletRepository.findById(request.sourceWalletId())
+
+        Wallet sourceWallet = walletRepository.findByIdWithLock(request.sourceWalletId())
                 .orElseThrow(() -> new IllegalArgumentException("Source wallet not found"));
 
         if (!sourceWallet.getUser().getId().equals(currentUser.getId())) {
