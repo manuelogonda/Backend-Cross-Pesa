@@ -1,10 +1,8 @@
-# Stage 1: Build the application using Maven with Java 21
 FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /app
 COPY . .
-RUN chmod +x mvnw && ./mvnw clean package -DskipTests
+RUN chmod +x mvnw && ./mvnw clean package -Dmaven.test.skip=true
 
-# Stage 2: Run the application with Java 21 runtime
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
