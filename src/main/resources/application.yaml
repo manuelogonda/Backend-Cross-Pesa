@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${PORT:8080}
 
 spring:
   application:
@@ -27,14 +27,14 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
 
-    # 2. HikariCP Connection Pool Optimization
+      # 2. HikariCP Connection Pool Optimization
     hikari:
-      pool-name: CrossPesaCP
-      maximum-pool-size: 10
-      minimum-idle: 5
-      idle-timeout: 300000
-      connection-timeout: 2000
-      max-lifetime: 1800000
+        pool-name: CrossPesaCP
+        maximum-pool-size: 10
+        minimum-idle: 5
+        idle-timeout: 300000
+        connection-timeout: 30000
+        max-lifetime: 1800000
 
   # 3. SQL Schema Initialization Controls
   sql:
