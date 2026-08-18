@@ -61,6 +61,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         // Allow Google OAuth2 login flow endpoints
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
+                        // Flutterwave webhook — called by Flutterwave servers, no JWT
+                        .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/flutterwave").permitAll()
                         //admin
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         // All other endpoints require a valid JWT

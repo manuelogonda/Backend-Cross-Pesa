@@ -21,15 +21,18 @@ public class FlutterwaveService {
     private final String secretKey;
     private final String baseUrl;
     private final String redirectUrl;
+    private final String webhookSecret;
 
     public FlutterwaveService(
             @Value("${flutterwave.secret-key}") String secretKey,
             @Value("${flutterwave.base-url}") String baseUrl,
-            @Value("${flutterwave.redirect-url}") String redirectUrl
+            @Value("${flutterwave.redirect-url}") String redirectUrl,
+            @Value("${flutterwave.webhook-secret}") String webhookSecret
     ) {
         this.secretKey = secretKey;
         this.baseUrl = baseUrl;
         this.redirectUrl = redirectUrl;
+        this.webhookSecret = webhookSecret;
 
         // 10-second timeout to prevent thread blocking if Flutterwave is down
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -46,12 +49,25 @@ public class FlutterwaveService {
         public record Data(String status, String amount, String currency, String tx_ref) {}
     }
 
+    /**
+     * Initialises a Flutterwave Standard checkout session.
+     * A stable {@code txRef} is generated internally so the caller does not need to supply one.
+     * Use {@link #initializePayment(String, String, BigDecimal, String, String)} when you want
+     * to supply your own reference (e.g. to link to an existing Transaction record).
+     */
     public String initializePayment(String userEmail, String userName, String amount, String currency) {
-        String txRef = "CROSSPESA-" + UUID.randomUUID().toString();
+        String txRef = "CROSSPESA-" + UUID.randomUUID();
+        return initializePayment(userEmail, userName, new BigDecimal(amount), currency, txRef);
+    }
 
+    /**
+     * Initialises a Flutterwave Standard checkout session with a caller-supplied {@code txRef}.
+     * The {@code txRef} must be unique and should map to a Transaction / gateway reference in our DB.
+     */
+    public String initializePayment(String userEmail, String userName, BigDecimal amount, String currency, String txRef) {
         FlutterwaveInitRequest requestPayload = FlutterwaveInitRequest.builder()
                 .tx_ref(txRef)
-                .amount(amount)
+                .amount(amount.toPlainString())
                 .currency(currency)
                 .redirect_url(redirectUrl)
                 .customer(FlutterwaveInitRequest.Customer.builder()
@@ -64,31 +80,49 @@ public class FlutterwaveService {
                         .build())
                 .build();
 
-        log.info("Sending Payment Request to {}/payments ...", baseUrl);
+        log.info("Sending payment initialisation request to {}/payments for txRef={}", baseUrl, txRef);
 
         FlutterwaveInitResponse response = restClient.post()
                 .uri(baseUrl + "/payments")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + secretKey) // v3 uses the Secret Key directly!
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + secretKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(requestPayload)
                 .retrieve()
                 .body(FlutterwaveInitResponse.class);
 
         if (response != null && "success".equals(response.getStatus())) {
-            log.info("Payment Link Generated Successfully for TX: {}", txRef);
+            log.info("Payment link generated for txRef={}", txRef);
             return response.getData().getLink();
         }
 
-        log.error("Failed to initialize payment link. Response: {}", response);
+        log.error("Failed to initialise payment link for txRef={}. Response: {}", txRef, response);
         throw new RuntimeException("Failed to initialize payment link");
+    }
+
+    /**
+     * Validates a Flutterwave webhook signature using constant-time comparison.
+     * Flutterwave sends the raw webhook secret as the {@code verif-hash} header value.
+     */
+    public boolean isValidWebhookSignature(String verifHash) {
+        if (verifHash == null || verifHash.isBlank()) {
+            return false;
+        }
+        return java.security.MessageDigest.isEqual(
+                verifHash.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                webhookSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        );
+    }
+
+    public boolean verifyTransaction(String transactionId, String expectedAmount, String expectedCurrency) {
+        return verifyTransaction(transactionId, new BigDecimal(expectedAmount), expectedCurrency);
     }
 
     /**
      * Verifies the final status of a transaction with Flutterwave.
      * Uses strict BigDecimal comparison to prevent floating-point precision errors.
      */
-    public boolean verifyTransaction(String transactionId, String expectedAmount, String expectedCurrency) {
-        log.info("⏳ Verifying transaction {} with Flutterwave...", transactionId);
+    public boolean verifyTransaction(String transactionId, BigDecimal expectedAmount, String expectedCurrency) {
+        log.info("Verifying transaction {} with Flutterwave...", transactionId);
 
         try {
             FlutterwaveVerifyResponse response = restClient.get()
@@ -100,30 +134,26 @@ public class FlutterwaveService {
             if (response != null && "success".equals(response.status())) {
                 FlutterwaveVerifyResponse.Data data = response.data();
 
-                // 1. Strict BigDecimal Comparison
-                BigDecimal expected = new BigDecimal(expectedAmount);
                 BigDecimal actual = new BigDecimal(data.amount());
 
-                // CRITICAL SECURITY CHECK: Ensure they paid the correct amount and currency!
                 boolean isSuccessful = "successful".equals(data.status());
-                boolean isCorrectAmount = expected.compareTo(actual) <= 0; // Ensures actual is >= expected
+                boolean isCorrectAmount = expectedAmount.compareTo(actual) <= 0;
                 boolean isCorrectCurrency = expectedCurrency.equals(data.currency());
 
-                log.debug("🔍 --- DEBUGGING VERIFICATION MISMATCH ---");
-                log.debug("Status Match: {} (Expected: successful | Actual: {})", isSuccessful, data.status());
-                log.debug("Amount Match: {} (Expected: {} | Actual: {})", isCorrectAmount, expectedAmount, data.amount());
-                log.debug("Currency Match: {} (Expected: {} | Actual: {})", isCorrectCurrency, expectedCurrency, data.currency());
-                log.debug("-------------------------------------------");
+                log.debug("Verification check — status={} amount_ok={} currency_ok={} (expected={}/{}, actual={}/{})",
+                        data.status(), isCorrectAmount, isCorrectCurrency,
+                        expectedAmount, expectedCurrency, data.amount(), data.currency());
 
                 if (isSuccessful && isCorrectAmount && isCorrectCurrency) {
-                    log.info("✅ Transaction {} verified successfully!", transactionId);
+                    log.info("Transaction {} verified successfully.", transactionId);
                     return true;
                 } else {
-                    log.warn("⚠️ Transaction {} verified, but data mismatch (Amount/Currency/Status).", transactionId);
+                    log.warn("Transaction {} verification failed: status={}, amount_ok={}, currency_ok={}",
+                            transactionId, data.status(), isCorrectAmount, isCorrectCurrency);
                 }
             }
         } catch (Exception e) {
-            log.error("❌ Verification failed for transaction {}: {}", transactionId, e.getMessage());
+            log.error("Verification call failed for transaction {}: {}", transactionId, e.getMessage());
         }
         return false;
     }

@@ -101,6 +101,30 @@ PENDING → PROCESSING → COMPLETED / FAILED / FLAGGED / CANCELLED
 - Ledger is the source of truth.
 - Wallet.balance is a projection updated only after successful ledger posting.
 
+## Flutterwave & Webhooks
+
+### Payment Initiation
+- Create or use a stable tx_ref that maps to our Transaction / payment reference.
+- Call Flutterwave Standard checkout and return the link.
+- Redirect success is untrusted.
+
+### Verification
+- Server-side verify endpoint must check status, amount and currency.
+- Prefer webhook as the primary confirmation path.
+
+### Webhook Safety (Mandatory)
+1. Validate signature (verif-hash) first.
+2. Return HTTP 200 OK immediately.
+3. Process asynchronously / in a separate transactional method.
+4. Processing must be fully idempotent (never double-credit).
+5. Credit wallet only through WalletService.addFunds (which checks gateway reference).
+
+### Configuration
+- flutterwave.secret-key
+- flutterwave.base-url
+- flutterwave.redirect-url
+- flutterwave.webhook-secret
+
 ## Coding Standards
 - Fully implemented production code only (no // TODO or placeholders).
 - Use BigDecimal for all money.

@@ -93,6 +93,7 @@ flutterwave:
   # The main API endpoint
   base-url: https://api.flutterwave.com/v3
   redirect-url: http://localhost:5173/wallet/verify-topup
+  webhook-secret: ${FLW_WEBHOOK_SECRET}
 
 
 #redis
