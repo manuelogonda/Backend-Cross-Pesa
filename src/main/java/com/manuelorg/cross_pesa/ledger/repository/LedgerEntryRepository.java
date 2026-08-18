@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -20,6 +21,12 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
      * Fetches all ledger entries belonging to a specific wallet (User statement).
      */
     Page<LedgerEntry> findByWalletIdOrderByCreatedAtDesc(UUID walletId, Pageable pageable);
+
+    /**
+     * Fetches the most recent ledger entry for a wallet — used to derive the current balance
+     * without relying on the wallet balance cache.
+     */
+    Optional<LedgerEntry> findTopByWalletIdOrderByCreatedAtDescIdDesc(UUID walletId);
 
     /**
      * Fetches all entries associated with a single parent Transaction (Audit view).

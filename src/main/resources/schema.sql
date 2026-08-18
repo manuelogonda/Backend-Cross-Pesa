@@ -277,38 +277,55 @@ EXECUTE FUNCTION update_modified_column()^^
 
 CREATE TABLE IF NOT EXISTS ledger_entries
 (
-    id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
-    transaction_id         UUID           NOT NULL
+    transaction_id       UUID NOT NULL
         REFERENCES transactions (id) ON DELETE RESTRICT,
 
-    wallet_id              UUID           NOT NULL
+    wallet_id            UUID NOT NULL
         REFERENCES wallets (id) ON DELETE RESTRICT,
 
-    entry_class            VARCHAR(50)    NOT NULL
-        CHECK (entry_class IN ('PRINCIPAL_TRANSFER', 'MARKUP_FEE', 'ROUTING_FEE','FX_CLEARING', 'DEPOSIT', 'WITHDRAWAL', 'REFUND')),
+    entry_class          VARCHAR(50) NOT NULL
+        CHECK (entry_class IN (
+                               'PRINCIPAL_TRANSFER',
+                               'MARKUP_FEE',
+                               'ROUTING_FEE',
+                               'FX_CLEARING',
+                               'DEPOSIT',
+                               'WITHDRAWAL',
+                               'REFUND',
+                               'TREASURY_ADJUSTMENT'
+            )),
 
-    debit                  NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
-    credit                 NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
-    currency               VARCHAR(3)     NOT NULL,
+    debit                NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
+    credit               NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
 
-    -- REMOVED THE STATIC CHECK: Handled dynamically per wallet type in the trigger
-    balance_after          NUMERIC(18, 4) NOT NULL,
+    currency             VARCHAR(3) NOT NULL
+        CHECK (currency ~ '^[A-Z]{3}$'),
 
-    description            VARCHAR(255)   NOT NULL,
+    balance_after        NUMERIC(18, 4) NOT NULL,   -- calculated in service
 
-    -- ==========================================
-    -- PRICING ENGINE AUDIT TRAIL
-    -- ==========================================
-    routing_pair           VARCHAR(10)    NULL,
-    markup_tiers_applied   VARCHAR(100)   NULL,
-    usd_baseline_amount    NUMERIC(18, 4) NULL,
+    description          VARCHAR(255) NOT NULL,
 
-    created_at             TIMESTAMPTZ    DEFAULT CURRENT_TIMESTAMP,
+    -- Pricing engine audit trail
+    routing_pair         VARCHAR(10),
+    markup_tiers_applied VARCHAR(100),
+    usd_baseline_amount  NUMERIC(18, 4),
 
+    -- Optional but useful for gateway reconciliation
+    external_reference   VARCHAR(100),
+
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    -- Double-entry invariant
     CONSTRAINT chk_debit_credit_exclusive CHECK (
         (debit > 0 AND credit = 0) OR
         (credit > 0 AND debit = 0)
+        ),
+
+    -- Safety
+    CONSTRAINT chk_non_negative_amounts CHECK (
+        debit >= 0 AND credit >= 0
         )
 );
 
@@ -439,4 +456,17 @@ CREATE INDEX idx_ledger_created_at ON ledger_entries (created_at);
 CREATE INDEX idx_kyc_smile_job_id ON kyc_submissions(smile_job_id);
 CREATE INDEX idx_kyc_user_id ON kyc_submissions(user_id);
 CREATE INDEX idx_kyc_status ON kyc_submissions(status);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_wallet_created
+    ON ledger_entries (wallet_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_transaction
+    ON ledger_entries (transaction_id);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_entry_class
+    ON ledger_entries (entry_class);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_external_ref
+    ON ledger_entries (external_reference)
+    WHERE external_reference IS NOT NULL;
 

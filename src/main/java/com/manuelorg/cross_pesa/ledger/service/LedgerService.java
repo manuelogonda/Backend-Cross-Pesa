@@ -44,6 +44,7 @@ public class LedgerService {
 
     /**
      * WRITE: Records a strict double-entry transfer for simple same-currency movements.
+     * Wallets are locked in deterministic UUID order to prevent deadlocks.
      */
     @Transactional
     public void recordSimpleTransfer(Transaction transaction, Wallet sourceWallet, Wallet targetWallet, BigDecimal amount, EntryClass entryClass, String description) {
@@ -51,21 +52,33 @@ public class LedgerService {
             throw new IllegalArgumentException("Direct simple transfers must be in the same currency.");
         }
 
-        // 1. Lock and fetch fresh wallet states
-        Wallet lockedSource = lockAndGetWallet(sourceWallet.getId());
-        Wallet lockedTarget = lockAndGetWallet(targetWallet.getId());
-
-        // 2. Enforce retail insufficient funds check
-        if (lockedSource.getWalletType() == WalletType.USER_RETAIL && lockedSource.getBalance().compareTo(amount) < 0) {
-            throw new IllegalStateException(String.format("Insufficient funds in wallet %s. Available: %s, Attempted Debit: %s",
-                    lockedSource.getId(), lockedSource.getBalance(), amount));
+        // 1. Lock wallets in deterministic order (smaller UUID first) to prevent deadlocks
+        Wallet lockedSource;
+        Wallet lockedTarget;
+        if (sourceWallet.getId().compareTo(targetWallet.getId()) < 0) {
+            lockedSource = lockAndGetWallet(sourceWallet.getId());
+            lockedTarget = lockAndGetWallet(targetWallet.getId());
+        } else {
+            lockedTarget = lockAndGetWallet(targetWallet.getId());
+            lockedSource = lockAndGetWallet(sourceWallet.getId());
         }
 
-        // 3. Calculate new balances
-        BigDecimal sourceNewBalance = lockedSource.getBalance().subtract(amount);
-        BigDecimal targetNewBalance = lockedTarget.getBalance().add(amount);
+        // 2. Derive current balances from the ledger (source of truth); fall back to wallet cache
+        BigDecimal sourceCurrentBalance = getCurrentBalance(lockedSource);
+        BigDecimal targetCurrentBalance = getCurrentBalance(lockedTarget);
 
-        // 4. Create DEBIT leg
+        // 3. Enforce retail insufficient funds check
+        if (lockedSource.getWalletType() == WalletType.USER_RETAIL && sourceCurrentBalance.compareTo(amount) < 0) {
+            throw new IllegalStateException(String.format(
+                    "Insufficient funds in wallet %s. Available: %s, Attempted Debit: %s",
+                    lockedSource.getId(), sourceCurrentBalance, amount));
+        }
+
+        // 4. Calculate new balances
+        BigDecimal sourceNewBalance = sourceCurrentBalance.subtract(amount);
+        BigDecimal targetNewBalance = targetCurrentBalance.add(amount);
+
+        // 5. Create DEBIT leg
         LedgerEntry debitEntry = LedgerEntry.builder()
                 .transaction(transaction)
                 .wallet(lockedSource)
@@ -77,7 +90,7 @@ public class LedgerService {
                 .description(description + " (Outgoing)")
                 .build();
 
-        // 5. Create CREDIT leg
+        // 6. Create CREDIT leg
         LedgerEntry creditEntry = LedgerEntry.builder()
                 .transaction(transaction)
                 .wallet(lockedTarget)
@@ -89,25 +102,27 @@ public class LedgerService {
                 .description(description + " (Incoming)")
                 .build();
 
-        // 6. Update entity cache/database balances
+        // 7. Persist ledger entries first (source of truth), then update wallet balance projection
+        ledgerEntryRepository.saveAll(List.of(debitEntry, creditEntry));
+
         lockedSource.setBalance(sourceNewBalance);
         lockedTarget.setBalance(targetNewBalance);
         walletRepository.saveAll(List.of(lockedSource, lockedTarget));
-
-        ledgerEntryRepository.saveAll(List.of(debitEntry, creditEntry));
 
         entityManager.flush();
         entityManager.clear();
     }
 
     /**
-     * WRITE: Records a single-leg deposit from an external gateway.
+     * WRITE: Records a single-leg credit deposit from an external gateway.
      */
     @Transactional
     public void recordGatewayDeposit(Transaction transaction, Wallet targetWallet, BigDecimal amount, String description) {
         Wallet lockedTarget = lockAndGetWallet(targetWallet.getId());
 
-        BigDecimal newBalance = lockedTarget.getBalance().add(amount);
+        // Derive current balance from the ledger; fall back to wallet cache if no entries exist yet
+        BigDecimal currentBalance = getCurrentBalance(lockedTarget);
+        BigDecimal newBalance = currentBalance.add(amount);
 
         LedgerEntry depositEntry = LedgerEntry.builder()
                 .transaction(transaction)
@@ -120,12 +135,25 @@ public class LedgerService {
                 .description(description)
                 .build();
 
+        // Persist ledger entry first (source of truth), then update wallet balance projection
+        ledgerEntryRepository.save(depositEntry);
+
         lockedTarget.setBalance(newBalance);
         walletRepository.save(lockedTarget);
-        ledgerEntryRepository.save(depositEntry);
 
         entityManager.flush();
         entityManager.clear();
+    }
+
+    /**
+     * Derives the current balance for a wallet from the most recent ledger entry.
+     * Falls back to the wallet's cached balance field if no ledger entries exist yet.
+     */
+    private BigDecimal getCurrentBalance(Wallet wallet) {
+        return ledgerEntryRepository
+                .findTopByWalletIdOrderByCreatedAtDescIdDesc(wallet.getId())
+                .map(LedgerEntry::getBalanceAfter)
+                .orElse(wallet.getBalance());
     }
 
     /**

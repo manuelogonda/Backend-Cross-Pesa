@@ -7,7 +7,6 @@ import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.generator.EventType;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -58,15 +57,20 @@ public class LedgerEntry {
     private BigDecimal credit = BigDecimal.ZERO;
 
     /**
-     * Set dynamically by PostgreSQL trigger BEFORE INSERT.
-     * We mark this updatable = false to respect the immutability trigger.
+     * Calculated and set by the service layer before insert.
+     * The ledger is the source of truth; this value is derived in Java, not by a database trigger.
      */
+    @Builder.Default
     @Column(name = "balance_after", nullable = false, precision = 18, scale = 4)
-    @org.hibernate.annotations.Generated
     private BigDecimal balanceAfter = BigDecimal.ZERO;
 
     @Column(name = "description", nullable = false, length = 255, updatable = false)
     private String description;
+
+    // --- OPTIONAL EXTERNAL REFERENCE ---
+
+    @Column(name = "external_reference", length = 255)
+    private String externalReference;
 
     // --- PRICING ENGINE AUDIT TRAIL ---
 
