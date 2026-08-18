@@ -75,7 +75,10 @@ public class WalletController {
     /**
      * POST /api/v1/wallets/verify
      * Verifies the Flutterwave transaction and credits the user's wallet.
-     * Protected against replay attacks via gateway reference tracking.
+     * Protected against replay attacks via gateway reference idempotency check in WalletService.
+     *
+     * NOTE: This endpoint is sandbox-only. In production, wallet credits must be driven
+     * by a verified webhook (signature-validated, async) — never by a client redirect.
      */
     @PostMapping("/verify")
     public ResponseEntity<Map<String, String>> verifyTopUp(

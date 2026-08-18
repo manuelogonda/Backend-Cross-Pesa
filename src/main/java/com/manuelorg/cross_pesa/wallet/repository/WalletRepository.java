@@ -59,6 +59,10 @@ public interface WalletRepository extends JpaRepository<Wallet, UUID> {
      */
     Optional<Wallet> findByCurrencyAndWalletType(Currency currency, WalletType walletType);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT w FROM Wallet w WHERE w.currency = :currency AND w.walletType = :walletType")
+    Optional<Wallet> findByCurrencyAndWalletTypeWithLock(@Param("currency") Currency currency, @Param("walletType") WalletType walletType);
+
     // --- ADMIN DASHBOARD & AUDIT LOOKUPS ---
 
     /**

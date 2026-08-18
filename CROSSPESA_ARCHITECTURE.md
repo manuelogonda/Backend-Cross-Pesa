@@ -29,6 +29,22 @@
 - USER_RETAIL, SYSTEM_MARKUP, SYSTEM_ROUTING, SYSTEM_LIQUIDITY
 - Available balance = balance - lockedBalance
 - System wallets have user = null
+- ## Wallet Feature
+
+### Wallet Types
+- USER_RETAIL – end-user spendable wallet
+- SYSTEM_MARKUP – receives platform markup fees
+- SYSTEM_ROUTING – receives corridor costs
+- SYSTEM_LIQUIDITY – FX clearing pools
+
+### Rules
+- One USER_RETAIL wallet per user (current design).
+- balance is a cache; ledger is the source of truth.
+- availableBalance = balance - lockedBalance (never negative).
+- Always lock with pessimistic write lock before mutation.
+- addFunds is idempotent on gatewayReference.
+- Top-up credit happens only after successful gateway verification (or webhook).
+- System wallets have user = null and are never exposed to normal users.
 
 ### Payment / Webhooks
 - Never trust redirect success.

@@ -33,11 +33,11 @@ public class Wallet {
 
     @Builder.Default
     @Enumerated(EnumType.STRING)
-    @Column(name = "wallet_type", nullable = false, length = 30)
+    @Column(name = "wallet_type", nullable = false, length = 30, updatable = false)
     private WalletType walletType = WalletType.USER_RETAIL;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "currency", nullable = false, length = 3)
+    @Column(name = "currency", nullable = false, length = 3, updatable = false)
     private Currency currency;
 
     @Builder.Default
@@ -68,8 +68,21 @@ public class Wallet {
     /**
      * Calculates the true spendable balance.
      * Prevents users from spending funds that are tied up in pending transactions.
+     * Never returns a negative value.
      */
     public BigDecimal getAvailableBalance() {
-        return this.balance.subtract(this.lockedBalance);
+        BigDecimal available = this.balance.subtract(
+                this.lockedBalance != null ? this.lockedBalance : BigDecimal.ZERO);
+        return available.max(BigDecimal.ZERO);
+    }
+
+    /**
+     * Throws if the wallet is not ACTIVE.
+     * Call this before any balance mutation.
+     */
+    public void ensureActive() {
+        if (this.status != WalletStatus.ACTIVE) {
+            throw new IllegalStateException("Wallet " + this.id + " is not ACTIVE (status=" + this.status + ").");
+        }
     }
 }
