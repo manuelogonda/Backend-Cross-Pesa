@@ -54,6 +54,37 @@
 - Wallet.balance is updated only after successful ledger posting (projection only).
 - initializeSystemWallets() runs on startup and creates the full currency grid if missing.
 
+
+## Transaction Feature
+
+### Core Flow
+1. Idempotency check
+2. Fraud / KYC hard validation
+3. Pessimistic lock on source wallet
+4. Live FX rates → QuoteResult from fee engine
+5. Available balance check under lock
+6. Create Transaction record
+7. Immediately post all ledger legs via SystemWalletEngine (or equivalent)
+8. Return response
+
+### Status Lifecycle
+PENDING → PROCESSING → COMPLETED / FAILED / FLAGGED / CANCELLED
+
+### Settlement Worker
+- Only confirms external payout status.
+- Never re-posts ledger legs.
+- Runs with fixedDelay and small batches.
+- Each reconciliation runs in REQUIRES_NEW.
+
+### Fraud Rules
+- Hard block: suspended/locked users, unapproved KYC, tier limit exceeded.
+- Soft flag: high-value (>100k KES) or velocity (>5 tx/hour).
+
+### Invariants
+- Idempotency key is unique and required.
+- Ledger is the source of truth.
+- Wallet.balance is a projection updated only after successful ledger posting.
+
 ## Coding Standards
 - Fully implemented production code only (no // TODO or placeholders).
 - Use BigDecimal for all money.

@@ -108,9 +108,8 @@ public class Transaction {
     @Column(name = "status", nullable = false, length = 30)
     private TransactionStatus status = TransactionStatus.PENDING;
 
-    @Builder.Default
     @Column(name = "idempotency_key", nullable = false, unique = true, updatable = false)
-    private UUID idempotencyKey = UUID.randomUUID();
+    private UUID idempotencyKey;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
