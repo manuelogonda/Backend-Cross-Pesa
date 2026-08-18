@@ -34,6 +34,26 @@
 - Never trust redirect success.
 - Only credit after verified webhook or explicit verify call + idempotency check.
 
+
+## Fee Engine & System Wallet Settlement
+
+### TransactionFeeEngineService
+- Progressive USD-tier markup (Tier 1: 0.60%, Tier 2: 0.40%, Tier 3: 0.20%).
+- Corridor-specific routing costs with fallback default.
+- All calculations use BigDecimal with scale 4 and HALF_UP.
+- Returns immutable QuoteResult used by the rest of the system.
+
+### SystemWalletEngine
+- Manages SYSTEM_LIQUIDITY, SYSTEM_MARKUP, SYSTEM_ROUTING wallets for every supported currency.
+- executeCrossBorderSettlement posts multi-leg double-entry entries:
+    - User debit (principal + markup + routing) – itemized
+    - System markup & routing credits
+    - FX clearing between source and target liquidity pools
+- balance_after is calculated in Java as a running balance per leg.
+- Always lock wallets with pessimistic locking in deterministic UUID order.
+- Wallet.balance is updated only after successful ledger posting (projection only).
+- initializeSystemWallets() runs on startup and creates the full currency grid if missing.
+
 ## Coding Standards
 - Fully implemented production code only (no // TODO or placeholders).
 - Use BigDecimal for all money.

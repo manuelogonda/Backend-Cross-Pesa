@@ -10,13 +10,15 @@ import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
 import com.manuelorg.cross_pesa.wallet.enums.WalletType;
 import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
 import jakarta.annotation.PostConstruct;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import jakarta.persistence.EntityManager;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -87,7 +89,8 @@ public class SystemWalletEngine {
 
     /**
      * Executes cross-border settlement, updates wallet balances explicitly,
-     * and writes fully audited immutable ledger legs with balance_after tracking.
+     * and writes fully audited double-entry ledger legs with correct running balanceAfter per leg.
+     * All wallets are locked in deterministic UUID order to prevent deadlocks.
      */
     @Transactional
     public void executeCrossBorderSettlement(
@@ -104,81 +107,116 @@ public class SystemWalletEngine {
 
         Currency sourceCurrency = userSourceWallet.getCurrency();
 
-        // 1. Lock all participating wallets to prevent race conditions during concurrent settlements
-        Wallet lockedUserWallet = lockAndGetWallet(userSourceWallet.getId());
-        Wallet markupWallet = lockAndGetWallet(getSystemWallet(sourceCurrency, WalletType.SYSTEM_MARKUP).getId());
-        Wallet routingWallet = lockAndGetWallet(getSystemWallet(sourceCurrency, WalletType.SYSTEM_ROUTING).getId());
-        Wallet sourceLiquidityWallet = lockAndGetWallet(getSystemWallet(sourceCurrency, WalletType.SYSTEM_LIQUIDITY).getId());
-        Wallet targetLiquidityWallet = lockAndGetWallet(getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY).getId());
+        // 1. Resolve all wallet IDs before locking, then lock in deterministic UUID order
+        UUID userWalletId = userSourceWallet.getId();
+        UUID markupWalletId = getSystemWallet(sourceCurrency, WalletType.SYSTEM_MARKUP).getId();
+        UUID routingWalletId = getSystemWallet(sourceCurrency, WalletType.SYSTEM_ROUTING).getId();
+        UUID sourceLiquidityId = getSystemWallet(sourceCurrency, WalletType.SYSTEM_LIQUIDITY).getId();
+        UUID targetLiquidityId = getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY).getId();
+
+        List<UUID> lockOrder = new ArrayList<>(List.of(
+                userWalletId, markupWalletId, routingWalletId, sourceLiquidityId, targetLiquidityId));
+        lockOrder.sort(Comparator.naturalOrder());
+
+        for (UUID id : lockOrder) {
+            lockAndGetWallet(id); // acquire pessimistic lock in deterministic order
+        }
+
+        // Re-fetch locked instances by their known IDs
+        Wallet lockedUserWallet = lockAndGetWallet(userWalletId);
+        Wallet markupWallet = lockAndGetWallet(markupWalletId);
+        Wallet routingWallet = lockAndGetWallet(routingWalletId);
+        Wallet sourceLiquidityWallet = lockAndGetWallet(sourceLiquidityId);
+        Wallet targetLiquidityWallet = lockAndGetWallet(targetLiquidityId);
 
         List<LedgerEntry> entries = new ArrayList<>();
 
-        // --- 2. CALCULATE NEW BALANCES & BUILD USER DEBITS ---
-        // Total debit from user = principal + markupFee + routingFee
+        // --- 2. DERIVE CURRENT BALANCES FROM LEDGER (source of truth) ---
+        BigDecimal userCurrentBalance = getCurrentBalance(lockedUserWallet);
+        BigDecimal markupCurrentBalance = getCurrentBalance(markupWallet);
+        BigDecimal routingCurrentBalance = getCurrentBalance(routingWallet);
+        BigDecimal sourceLiqCurrentBalance = getCurrentBalance(sourceLiquidityWallet);
+        BigDecimal targetLiqCurrentBalance = getCurrentBalance(targetLiquidityWallet);
+
+        // --- 3. VALIDATE USER FUNDS ---
         BigDecimal totalUserDebit = principal.add(markupFee).add(routingFee);
-        if (lockedUserWallet.getWalletType() == WalletType.USER_RETAIL && lockedUserWallet.getBalance().compareTo(totalUserDebit) < 0) {
-            throw new IllegalStateException(String.format("Insufficient funds for user wallet ID %s. Balance: %s, Required: %s",
-                    lockedUserWallet.getId(), lockedUserWallet.getBalance(), totalUserDebit));
+        if (lockedUserWallet.getWalletType() == WalletType.USER_RETAIL
+                && userCurrentBalance.compareTo(totalUserDebit) < 0) {
+            throw new IllegalStateException(String.format(
+                    "Insufficient funds for user wallet ID %s. Balance: %s, Required: %s",
+                    lockedUserWallet.getId(), userCurrentBalance, totalUserDebit));
         }
 
-        BigDecimal userNewBalance = lockedUserWallet.getBalance().subtract(totalUserDebit);
+        // --- 4. USER DEBIT LEGS — running balance per leg ---
+        BigDecimal userRunningBalance = userCurrentBalance;
 
-        // Individual itemized legs for the user wallet
-        entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.PRINCIPAL_TRANSFER, principal, BigDecimal.ZERO,
-                sourceCurrency, "Outbound remittance principal", routingPair, tiersApplied, usdBaseline, userNewBalance));
+        userRunningBalance = userRunningBalance.subtract(principal);
+        entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.PRINCIPAL_TRANSFER,
+                principal, BigDecimal.ZERO, sourceCurrency,
+                "Outbound remittance principal", routingPair, tiersApplied, usdBaseline, userRunningBalance));
 
         if (markupFee.compareTo(BigDecimal.ZERO) > 0) {
-            entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.MARKUP_FEE, markupFee, BigDecimal.ZERO,
-                    sourceCurrency, "Deducting platform profit", routingPair, tiersApplied, usdBaseline, userNewBalance));
+            userRunningBalance = userRunningBalance.subtract(markupFee);
+            entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.MARKUP_FEE,
+                    markupFee, BigDecimal.ZERO, sourceCurrency,
+                    "Deducting platform profit", routingPair, tiersApplied, usdBaseline, userRunningBalance));
         }
 
         if (routingFee.compareTo(BigDecimal.ZERO) > 0) {
-            entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.ROUTING_FEE, routingFee, BigDecimal.ZERO,
-                    sourceCurrency, "Deducting banking corridor cost", routingPair, tiersApplied, usdBaseline, userNewBalance));
+            userRunningBalance = userRunningBalance.subtract(routingFee);
+            entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.ROUTING_FEE,
+                    routingFee, BigDecimal.ZERO, sourceCurrency,
+                    "Deducting banking corridor cost", routingPair, tiersApplied, usdBaseline, userRunningBalance));
         }
 
-        lockedUserWallet.setBalance(userNewBalance);
+        lockedUserWallet.setBalance(userRunningBalance);
 
-        // --- 3. SYSTEM REVENUE CREDITS ---
+        // --- 5. SYSTEM REVENUE CREDITS ---
         if (markupFee.compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal markupNewBalance = markupWallet.getBalance().add(markupFee);
-            entries.add(buildLeg(transaction, markupWallet, EntryClass.MARKUP_FEE, BigDecimal.ZERO, markupFee,
-                    sourceCurrency, "Crediting platform pure profit", routingPair, tiersApplied, usdBaseline, markupNewBalance));
+            BigDecimal markupNewBalance = markupCurrentBalance.add(markupFee);
+            entries.add(buildLeg(transaction, markupWallet, EntryClass.MARKUP_FEE,
+                    BigDecimal.ZERO, markupFee, sourceCurrency,
+                    "Crediting platform pure profit", routingPair, tiersApplied, usdBaseline, markupNewBalance));
             markupWallet.setBalance(markupNewBalance);
         }
 
         if (routingFee.compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal routingNewBalance = routingWallet.getBalance().add(routingFee);
-            entries.add(buildLeg(transaction, routingWallet, EntryClass.ROUTING_FEE, BigDecimal.ZERO, routingFee,
-                    sourceCurrency, "Crediting money to pay external banks", routingPair, tiersApplied, usdBaseline, routingNewBalance));
+            BigDecimal routingNewBalance = routingCurrentBalance.add(routingFee);
+            entries.add(buildLeg(transaction, routingWallet, EntryClass.ROUTING_FEE,
+                    BigDecimal.ZERO, routingFee, sourceCurrency,
+                    "Crediting money to pay external banks", routingPair, tiersApplied, usdBaseline, routingNewBalance));
             routingWallet.setBalance(routingNewBalance);
         }
 
-        // --- 4. FX CLEARING POOLS (Source out, Target in) ---
+        // --- 6. FX CLEARING POOLS (Source receives principal net of routing; Target disburses payout) ---
         BigDecimal totalSourceClearingAmount = principal.subtract(routingFee);
-        BigDecimal sourceLiquidityNewBalance = sourceLiquidityWallet.getBalance().add(totalSourceClearingAmount);
-        entries.add(buildLeg(transaction, sourceLiquidityWallet, EntryClass.FX_CLEARING, BigDecimal.ZERO, totalSourceClearingAmount,
-                sourceCurrency, "Inbound clearing float lock", routingPair, tiersApplied, usdBaseline, sourceLiquidityNewBalance));
-        sourceLiquidityWallet.setBalance(sourceLiquidityNewBalance);
+        BigDecimal sourceLiqNewBalance = sourceLiqCurrentBalance.add(totalSourceClearingAmount);
+        entries.add(buildLeg(transaction, sourceLiquidityWallet, EntryClass.FX_CLEARING,
+                BigDecimal.ZERO, totalSourceClearingAmount, sourceCurrency,
+                "Inbound clearing float lock", routingPair, tiersApplied, usdBaseline, sourceLiqNewBalance));
+        sourceLiquidityWallet.setBalance(sourceLiqNewBalance);
 
-        BigDecimal targetLiquidityNewBalance = targetLiquidityWallet.getBalance().subtract(targetPayoutAmount);
-        // Note: For target liquidity disbursement, it acts as a credit/outflow from pool perspective or tracking pool depth
-        entries.add(buildLeg(transaction, targetLiquidityWallet, EntryClass.FX_CLEARING, targetPayoutAmount, BigDecimal.ZERO,
-                targetCurrency, "Local float payout to beneficiary", routingPair, tiersApplied, usdBaseline, targetLiquidityNewBalance));
-        targetLiquidityWallet.setBalance(targetLiquidityNewBalance);
+        BigDecimal targetLiqNewBalance = targetLiqCurrentBalance.subtract(targetPayoutAmount);
+        entries.add(buildLeg(transaction, targetLiquidityWallet, EntryClass.FX_CLEARING,
+                targetPayoutAmount, BigDecimal.ZERO, targetCurrency,
+                "Local float payout to beneficiary", routingPair, tiersApplied, usdBaseline, targetLiqNewBalance));
+        targetLiquidityWallet.setBalance(targetLiqNewBalance);
 
-        // 5. Persist updated balances and append full double-entry transaction block
-        walletRepository.saveAll(List.of(lockedUserWallet, markupWallet, routingWallet, sourceLiquidityWallet, targetLiquidityWallet));
+        // 7. Persist ledger entries first (source of truth), then update wallet balance projections
         ledgerEntryRepository.saveAll(entries);
+        walletRepository.saveAll(List.of(
+                lockedUserWallet, markupWallet, routingWallet, sourceLiquidityWallet, targetLiquidityWallet));
 
         entityManager.flush();
         entityManager.clear();
 
-        log.info("Executed balanced settlement for Transaction: {}", transaction.getId());
+        log.info("Executed balanced cross-border settlement for Transaction: {} [{} -> {}]",
+                transaction.getId(), sourceCurrency, targetCurrency);
     }
 
     /**
-     * Executes treasury rebalancing between system liquidity wallets with explicit cache updates.
+     * Executes treasury rebalancing between system liquidity wallets with correct running balanceAfter.
+     * Wallets are locked in deterministic UUID order to prevent deadlocks.
      */
     @Transactional
     public void executeTreasuryRebalance(
@@ -189,34 +227,65 @@ public class SystemWalletEngine {
             BigDecimal depositAmount,
             String adminNotes) {
 
-        Wallet sourceLiquidity = lockAndGetWallet(getSystemWallet(sourceCurrency, WalletType.SYSTEM_LIQUIDITY).getId());
-        Wallet targetLiquidity = lockAndGetWallet(getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY).getId());
+        UUID sourceId = getSystemWallet(sourceCurrency, WalletType.SYSTEM_LIQUIDITY).getId();
+        UUID targetId = getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY).getId();
 
-        if (sourceLiquidity.getBalance().compareTo(withdrawAmount) < 0) {
-            throw new IllegalStateException("Insufficient source liquidity for treasury rebalance.");
+        // Lock in deterministic UUID order
+        Wallet sourceLiquidity;
+        Wallet targetLiquidity;
+        if (sourceId.compareTo(targetId) < 0) {
+            sourceLiquidity = lockAndGetWallet(sourceId);
+            targetLiquidity = lockAndGetWallet(targetId);
+        } else {
+            targetLiquidity = lockAndGetWallet(targetId);
+            sourceLiquidity = lockAndGetWallet(sourceId);
         }
 
-        BigDecimal sourceNewBalance = sourceLiquidity.getBalance().subtract(withdrawAmount);
-        BigDecimal targetNewBalance = targetLiquidity.getBalance().add(depositAmount);
+        // Derive current balances from ledger (source of truth)
+        BigDecimal sourceCurrentBalance = getCurrentBalance(sourceLiquidity);
+        BigDecimal targetCurrentBalance = getCurrentBalance(targetLiquidity);
 
-        sourceLiquidity.setBalance(sourceNewBalance);
-        targetLiquidity.setBalance(targetNewBalance);
+        if (sourceCurrentBalance.compareTo(withdrawAmount) < 0) {
+            throw new IllegalStateException(String.format(
+                    "Insufficient source liquidity for treasury rebalance. Available: %s, Required: %s",
+                    sourceCurrentBalance, withdrawAmount));
+        }
+
+        BigDecimal sourceNewBalance = sourceCurrentBalance.subtract(withdrawAmount);
+        BigDecimal targetNewBalance = targetCurrentBalance.add(depositAmount);
 
         List<LedgerEntry> rebalanceEntries = new ArrayList<>();
 
-        rebalanceEntries.add(buildLeg(adminTransaction, sourceLiquidity, EntryClass.WITHDRAWAL, withdrawAmount, BigDecimal.ZERO,
-                sourceCurrency, "Admin withdrawal: " + adminNotes, "TREASURY", "NONE", withdrawAmount, sourceNewBalance));
+        rebalanceEntries.add(buildLeg(adminTransaction, sourceLiquidity, EntryClass.WITHDRAWAL,
+                withdrawAmount, BigDecimal.ZERO, sourceCurrency,
+                "Admin withdrawal: " + adminNotes, "TREASURY", "NONE", withdrawAmount, sourceNewBalance));
 
-        rebalanceEntries.add(buildLeg(adminTransaction, targetLiquidity, EntryClass.DEPOSIT, BigDecimal.ZERO, depositAmount,
-                targetCurrency, "Admin deposit: " + adminNotes, "TREASURY", "NONE", withdrawAmount, targetNewBalance));
+        rebalanceEntries.add(buildLeg(adminTransaction, targetLiquidity, EntryClass.DEPOSIT,
+                BigDecimal.ZERO, depositAmount, targetCurrency,
+                "Admin deposit: " + adminNotes, "TREASURY", "NONE", withdrawAmount, targetNewBalance));
 
-        walletRepository.saveAll(List.of(sourceLiquidity, targetLiquidity));
+        // Persist ledger entries first (source of truth), then update wallet balance projections
         ledgerEntryRepository.saveAll(rebalanceEntries);
+
+        sourceLiquidity.setBalance(sourceNewBalance);
+        targetLiquidity.setBalance(targetNewBalance);
+        walletRepository.saveAll(List.of(sourceLiquidity, targetLiquidity));
 
         entityManager.flush();
         entityManager.clear();
 
         log.info("Treasury Rebalanced: -{} {} -> +{} {}", withdrawAmount, sourceCurrency, depositAmount, targetCurrency);
+    }
+
+    /**
+     * Derives the current balance for a wallet from the most recent ledger entry.
+     * Falls back to the wallet's cached balance field if no ledger entries exist yet.
+     */
+    private BigDecimal getCurrentBalance(Wallet wallet) {
+        return ledgerEntryRepository
+                .findTopByWalletIdOrderByCreatedAtDescIdDesc(wallet.getId())
+                .map(LedgerEntry::getBalanceAfter)
+                .orElse(wallet.getBalance());
     }
 
     private Wallet lockAndGetWallet(UUID walletId) {
