@@ -155,6 +155,15 @@ PENDING → PROCESSING → COMPLETED / FAILED / FLAGGED / CANCELLED
 - Used by the send-money flow as the external payout destination.
 - Prefer per-user uniqueness for email/phone rather than global uniqueness.
 
+## Notification Module
+
+- Event-driven: services publish TriggerNotificationEvent; NotificationService listens.
+- Supports IN_APP, SMS (Africa’s Talking), EMAIL (SendGrid placeholder).
+- Idempotent on (transactionId + notificationType).
+- In-app inbox with UNREAD / READ / ARCHIVED status.
+- Ownership enforced on mark-as-read.
+- SMS numbers normalized to E.164 before sending.
+
 ## Coding Standards
 - Fully implemented production code only (no // TODO or placeholders).
 - Use BigDecimal for all money.
