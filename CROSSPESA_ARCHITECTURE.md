@@ -146,6 +146,15 @@ PENDING → PROCESSING → COMPLETED / FAILED / FLAGGED / CANCELLED
 - Every status or KYC change is logged with admin identity + reason.
 - Rebalance creates an audit Transaction and balanced ledger legs.
 
+
+## Beneficiary Module
+
+- Users can save payout contacts (bank / mobile money / card).
+- Unique per user: (user_id + payout_provider + account_number).
+- Ownership is strictly enforced on read/update/delete.
+- Used by the send-money flow as the external payout destination.
+- Prefer per-user uniqueness for email/phone rather than global uniqueness.
+
 ## Coding Standards
 - Fully implemented production code only (no // TODO or placeholders).
 - Use BigDecimal for all money.
