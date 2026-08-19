@@ -23,39 +23,62 @@ public class SmileIdService {
 
     @Transactional
     public void processWebhook(Map<String, Object> payload) {
+        if (payload == null || payload.isEmpty()) {
+            log.warn("Received empty or null Smile ID webhook payload");
+            return;
+        }
+
         try {
             // 1. Extract core data from the Smile ID payload
             String jobId = (String) payload.get("JobID");
+            if (jobId == null || jobId.isBlank()) {
+                log.warn("Smile ID Webhook payload missing JobID");
+                return;
+            }
+
             String resultText = (String) payload.get("ResultText"); // Usually "Approved", "Rejected", or "Provisionally Approved"
 
             log.info("Processing Smile ID Webhook for Job: {}", jobId);
 
             // 2. Find the pending submission in our database
             KycSubmission submission = kycRepository.findBySmileJobId(jobId)
-                    .orElseThrow(() -> new IllegalArgumentException("No KYC submission found for Job ID: " + jobId));
+                    .orElse(null);
+
+            if (submission == null) {
+                log.warn("No KYC submission found for Job ID: {}", jobId);
+                return;
+            }
 
             // Prevent processing the same webhook twice
-            if (!submission.getStatus().equals("PENDING")) {
+            if (!"PENDING".equalsIgnoreCase(submission.getStatus())) {
                 log.warn("Job {} is already processed. Current status: {}", jobId, submission.getStatus());
                 return;
             }
 
             // 3. Extract Image Links (Smile ID sends these in an 'ImageLinks' object)
             // Note: Safely casting nested maps to avoid NullPointerExceptions
-            Map<String, Object> imageLinks = (Map<String, Object>) payload.get("ImageLinks");
-            if (imageLinks != null) {
-                String smileSelfieUrl = (String) imageLinks.get("SelfieImage");
-                String smileIdUrl = (String) imageLinks.get("IDImage");
+            Object imageLinksObj = payload.get("ImageLinks");
+            if (imageLinksObj instanceof Map<?, ?> rawImageLinks) {
+                String smileSelfieUrl = rawImageLinks.get("SelfieImage") instanceof String s ? s : null;
+                String smileIdUrl = rawImageLinks.get("IDImage") instanceof String s ? s : null;
 
                 // 4. Permanently store images in Cloudinary so they don't expire
-                if (smileIdUrl != null) {
-                    String permanentIdUrl = cloudinaryService.uploadImageFromUrl(smileIdUrl, "cross_pesa_kyc/ids");
-                    submission.setIdImageUrl(permanentIdUrl);
+                if (smileIdUrl != null && !smileIdUrl.isBlank()) {
+                    try {
+                        String permanentIdUrl = cloudinaryService.uploadImageFromUrl(smileIdUrl, "cross_pesa_kyc/ids");
+                        submission.setIdImageUrl(permanentIdUrl);
+                    } catch (Exception e) {
+                        log.error("Failed to upload ID image to Cloudinary for Job ID: {}", jobId, e);
+                    }
                 }
 
-                if (smileSelfieUrl != null) {
-                    String permanentSelfieUrl = cloudinaryService.uploadImageFromUrl(smileSelfieUrl, "cross_pesa_kyc/selfies");
-                    submission.setSelfieImageUrl(permanentSelfieUrl);
+                if (smileSelfieUrl != null && !smileSelfieUrl.isBlank()) {
+                    try {
+                        String permanentSelfieUrl = cloudinaryService.uploadImageFromUrl(smileSelfieUrl, "cross_pesa_kyc/selfies");
+                        submission.setSelfieImageUrl(permanentSelfieUrl);
+                    } catch (Exception e) {
+                        log.error("Failed to upload selfie image to Cloudinary for Job ID: {}", jobId, e);
+                    }
                 }
             }
 
@@ -66,11 +89,12 @@ public class SmileIdService {
 
                 // Upgrade the User's KYC Level automatically!
                 User user = submission.getUser();
-                user.setKycStatus(KycStatus.APPROVED);
-                user.setKycLevel(2);
-                userRepository.save(user);
-
-                log.info("Auto-approved KYC for user: {}", user.getEmail());
+                if (user != null) {
+                    user.setKycStatus(KycStatus.APPROVED);
+                    user.setKycLevel(2);
+                    userRepository.save(user);
+                    log.info("Auto-approved KYC for user: {}", user.getEmail());
+                }
 
             } else if ("Rejected".equalsIgnoreCase(resultText)) {
                 // Auto-Reject the submission
@@ -88,8 +112,6 @@ public class SmileIdService {
 
         } catch (Exception e) {
             log.error("Failed to process Smile ID Webhook", e);
-            // In a real production environment, you might want to save failed webhooks to a dead-letter queue table
-            throw new RuntimeException("Webhook processing failed", e);
         }
     }
 }

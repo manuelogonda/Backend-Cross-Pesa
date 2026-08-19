@@ -66,8 +66,11 @@ public class KycService {
             userRepository.save(targetUser);
 
         } else if (action.equalsIgnoreCase("REJECTED")) {
+            if (reason == null || reason.isBlank()) {
+                throw new IllegalArgumentException("Rejection reason is required when action is REJECTED.");
+            }
             submission.setStatus("REJECTED");
-            submission.setRejectionReason(reason);
+            submission.setRejectionReason(reason.trim());
         } else {
             throw new IllegalArgumentException("Invalid action. Must be APPROVED or REJECTED.");
         }
@@ -81,10 +84,10 @@ public class KycService {
         boolean hasPending = kycRepository.findByUserIdOrderByCreatedAtDesc(user.getId())
                 .stream()
                 .anyMatch(sub -> sub.getStatus().equals("PENDING"));
-// TEMPORARILY COMMENTED OUT FOR FRONTEND TESTING
-//        if (hasPending) {
-//            throw new IllegalStateException("You already have a KYC submission under review.");
-//        }
+
+        if (hasPending) {
+            throw new IllegalStateException("You already have a KYC submission under review.");
+        }
 
         KycSubmission submission = KycSubmission.builder()
                 .user(user)

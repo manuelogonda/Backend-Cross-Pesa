@@ -172,6 +172,16 @@ PENDING → PROCESSING → COMPLETED / FAILED / FLAGGED / CANCELLED
 - Ownership enforced on mark-as-read.
 - SMS numbers normalized to E.164 before sending.
 
+
+## KYC Module
+
+- Provider: Smile ID (biometric + document verification).
+- Flow: User submits smileJobId → PENDING record → Smile ID webhook → auto APPROVED/REJECTED or leave PENDING for admin.
+- Images from Smile ID are copied to Cloudinary for permanent storage.
+- Admin can manually approve/reject PENDING submissions.
+- On approval: user.kycStatus = APPROVED, user.kycLevel = 2 (or higher by policy).
+- Webhook must return HTTP 200 quickly; processing should be idempotent.
+
 ## Coding Standards
 - Fully implemented production code only (no // TODO or placeholders).
 - Use BigDecimal for all money.
