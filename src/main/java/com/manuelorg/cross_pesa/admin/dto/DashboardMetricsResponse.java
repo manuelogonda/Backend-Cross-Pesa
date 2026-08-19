@@ -6,5 +6,7 @@ public record DashboardMetricsResponse(
         long totalTransactionsToday,
         long pendingTransactions,
         long flaggedTransactions,
-        BigDecimal totalRevenueToday // Sum of all fees collected
+        BigDecimal totalRevenueToday, // Sum of all fees collected
+        BigDecimal netMarkupRevenueToday,
+        long completedTransactionsToday
 ) {}

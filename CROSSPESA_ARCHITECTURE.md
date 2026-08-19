@@ -125,6 +125,27 @@ PENDING → PROCESSING → COMPLETED / FAILED / FLAGGED / CANCELLED
 - flutterwave.redirect-url
 - flutterwave.webhook-secret
 
+## Admin Module
+
+### Access Control
+- All endpoints require ROLE_ADMIN.
+- Mutating actions must record who performed them and why (reason / adminNotes).
+
+### Capabilities
+- Dashboard metrics (today’s volume, pending, flagged, revenue)
+- Transaction search & filtering by status
+- User listing
+- View any user’s retail wallet and full ledger statement
+- Freeze / suspend / activate a user’s retail wallet
+- Update KYC status and level
+- View system wallets (LIQUIDITY / MARKUP / ROUTING)
+- Execute treasury rebalance between liquidity pools (audited via Transaction + ledger)
+
+### Invariants
+- Treasury can never touch USER_RETAIL wallets.
+- Every status or KYC change is logged with admin identity + reason.
+- Rebalance creates an audit Transaction and balanced ledger legs.
+
 ## Coding Standards
 - Fully implemented production code only (no // TODO or placeholders).
 - Use BigDecimal for all money.

@@ -40,20 +40,21 @@ public class AdminUserOpsController {
     }
 
     @PostMapping("/{userId}/wallet/status")
-    public ResponseEntity<Map<String, Object>> changeWalletStatus(
+    public ResponseEntity<AdminUserDto.AdminWalletStatusResponse> changeWalletStatus(
             @PathVariable UUID userId,
-            @Valid @RequestBody AdminUserDto.UpdateStatusRequest request, // 👈 Replaced raw Map with typed DTO
+            @Valid @RequestBody AdminUserDto.UpdateStatusRequest request,
             @AuthenticationPrincipal User adminUser
     ) {
         WalletResponse updatedWallet = userOpsService.updateWalletStatus(
                 userId,
                 request.status(),
+                request.reason(),
                 adminUser.getEmail()
         );
 
-        return ResponseEntity.ok(Map.of(
-                "message", "Wallet status updated successfully",
-                "wallet", updatedWallet
+        return ResponseEntity.ok(new AdminUserDto.AdminWalletStatusResponse(
+                "Wallet status updated successfully",
+                updatedWallet
         ));
     }
 
@@ -64,6 +65,6 @@ public class AdminUserOpsController {
             @AuthenticationPrincipal User adminUser
     ) {
         userOpsService.updateUserKyc(userId, request, adminUser);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.noContent().build();
     }
 }

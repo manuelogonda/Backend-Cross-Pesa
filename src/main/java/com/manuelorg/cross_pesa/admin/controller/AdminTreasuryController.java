@@ -1,5 +1,6 @@
 package com.manuelorg.cross_pesa.admin.controller;
 
+import com.manuelorg.cross_pesa.admin.dto.AdminMessageResponse;
 import com.manuelorg.cross_pesa.admin.dto.TreasuryRebalanceRequest;
 import com.manuelorg.cross_pesa.admin.service.AdminTreasuryService;
 import com.manuelorg.cross_pesa.auth.entity.User;
@@ -13,8 +14,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/admin/treasury")
@@ -33,11 +32,11 @@ public class AdminTreasuryController {
     }
 
     @PostMapping("/rebalance")
-    public ResponseEntity<Map<String, String>> rebalancePools(
+    public ResponseEntity<AdminMessageResponse> rebalancePools(
             @AuthenticationPrincipal User admin,
             @Valid @RequestBody TreasuryRebalanceRequest request
     ) {
         treasuryService.executeRebalance(admin, request);
-        return ResponseEntity.ok(Map.of("message", "Treasury rebalance executed and logged successfully."));
+        return ResponseEntity.ok(new AdminMessageResponse("Treasury rebalance executed and logged successfully."));
     }
 }

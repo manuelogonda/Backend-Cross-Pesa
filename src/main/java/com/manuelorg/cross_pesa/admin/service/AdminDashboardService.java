@@ -38,23 +38,36 @@ public class AdminDashboardService {
 
         long flaggedTransactions = transactionRepository.countByStatus(TransactionStatus.FLAGGED);
 
+        long completedTransactionsToday = transactionRepository.countByStatusAndCreatedAtAfter(
+                TransactionStatus.COMPLETED, startOfDay
+        );
+
         BigDecimal totalRevenueToday = transactionRepository.sumTotalFeeByCreatedAtAfter(startOfDay);
         if (totalRevenueToday == null) {
             totalRevenueToday = BigDecimal.ZERO;
+        }
+
+        BigDecimal netMarkupRevenueToday = transactionRepository.sumNetMarkupRevenueSince(
+                startOfDay, TransactionStatus.COMPLETED
+        );
+        if (netMarkupRevenueToday == null) {
+            netMarkupRevenueToday = BigDecimal.ZERO;
         }
 
         return new DashboardMetricsResponse(
                 totalTransactionsToday,
                 pendingTransactions,
                 flaggedTransactions,
-                totalRevenueToday
+                totalRevenueToday,
+                netMarkupRevenueToday,
+                completedTransactionsToday
         );
     }
 
     @Transactional(readOnly = true)
     public Page<AdminTransactionResponse> getTransactions(String status, Pageable pageable) {
-        if (status != null && !status.equalsIgnoreCase("ALL")) {
-            TransactionStatus txStatus = TransactionStatus.valueOf(status.toUpperCase());
+        if (status != null && !status.isBlank() && !status.equalsIgnoreCase("ALL")) {
+            TransactionStatus txStatus = TransactionStatus.valueOf(status.trim().toUpperCase());
             return transactionRepository.findByStatus(txStatus, pageable)
                     .map(AdminTransactionResponse::fromEntity);
         }
@@ -65,18 +78,6 @@ public class AdminDashboardService {
     @Transactional(readOnly = true)
     public Page<AdminUserDto.AdminUserResponse> getUsers(Pageable pageable) {
         return userRepository.findAll(pageable)
-                .map(user -> new AdminUserDto.AdminUserResponse(
-                        user.getId(),
-                        user.getFirstName(),
-                        user.getLastName(),
-                        user.getEmail(),
-                        user.getPhoneNumber(),
-                        user.getIdType(),
-                        user.getIdNumber(),
-                        user.getStatus(),
-                        user.getKycStatus(),
-                        user.getKycLevel(),
-                        user.getCreatedAt()
-                ));
+                .map(AdminUserDto.AdminUserResponse::fromEntity);
     }
 }

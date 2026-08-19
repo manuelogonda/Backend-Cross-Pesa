@@ -60,19 +60,19 @@ public class AdminUserOpsService {
      * WRITE: Update customer wallet status (Freeze/Suspend).
      */
     @Transactional
-    public WalletResponse updateWalletStatus(UUID userId, WalletStatus newStatus, String adminEmail) {
+    public WalletResponse updateWalletStatus(UUID userId, WalletStatus newStatus, String reason, String adminEmail) {
         Wallet wallet = walletRepository.findByUserIdAndWalletType(userId, WalletType.USER_RETAIL)
                 .orElseThrow(() -> new IllegalArgumentException("Retail wallet not found"));
 
         wallet.setStatus(newStatus);
-        walletRepository.save(wallet);
+        Wallet savedWallet = walletRepository.save(wallet);
 
-        log.warn("RISK OPS: User {} wallet changed to {} by Admin {}", userId, newStatus, adminEmail);
-        return WalletResponse.fromEntity(wallet);
+        log.warn("RISK OPS: User {} wallet changed to {} by Admin {}. Reason: {}", userId, newStatus, adminEmail, reason);
+        return WalletResponse.fromEntity(savedWallet);
     }
 
     @Transactional
-    public void updateUserKyc(UUID userId, AdminUserDto.UpdateKycRequest request, User adminEmail) {
+    public void updateUserKyc(UUID userId, AdminUserDto.UpdateKycRequest request, User adminUser) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found with ID: " + userId));
 
@@ -87,12 +87,12 @@ public class AdminUserOpsService {
             KycSubmission latestKyc = submissions.getFirst();
             latestKyc.setStatus(String.valueOf(request.kycStatus()));
             latestKyc.setRejectionReason(request.adminNotes());
-            latestKyc.setReviewedAt(java.time.LocalDateTime.now()); // 👈 Fixed: LocalDateTime instead of OffsetDateTime
-            latestKyc.setReviewedBy(adminEmail);                      // 👈 Fixed: String email passed directly
+            latestKyc.setReviewedAt(java.time.LocalDateTime.now());
+            latestKyc.setReviewedBy(adminUser);
             kycSubmissionRepository.save(latestKyc);
         }
 
         log.warn("COMPLIANCE OPS: User {} KYC updated to status {} Level {} by Admin {}. Notes: {}",
-                userId, request.kycStatus(), request.kycLevel(), adminEmail, request.adminNotes());
+                userId, request.kycStatus(), request.kycLevel(), adminUser.getEmail(), request.adminNotes());
     }
 }

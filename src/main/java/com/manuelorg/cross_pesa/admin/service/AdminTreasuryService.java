@@ -45,12 +45,18 @@ public class AdminTreasuryService {
      */
     @Transactional
     public void executeRebalance(User adminUser, TreasuryRebalanceRequest request) {
-        log.info("TREASURY ALERT: Admin {} initiating rebalance: -{} {} -> +{} {}",
+        log.info("TREASURY ALERT: Admin {} initiating rebalance: -{} {} -> +{} {}. Reason: {}",
                 adminUser.getEmail(), request.withdrawAmount(), request.sourceCurrency(),
-                request.depositAmount(), request.targetCurrency());
+                request.depositAmount(), request.targetCurrency(), request.notes());
 
         Wallet sourceLiquidity = systemWalletEngine.getSystemWallet(request.sourceCurrency(), WalletType.SYSTEM_LIQUIDITY);
         Wallet targetLiquidity = systemWalletEngine.getSystemWallet(request.targetCurrency(), WalletType.SYSTEM_LIQUIDITY);
+
+        // Guard against touching retail wallets
+        if (sourceLiquidity.getWalletType() == WalletType.USER_RETAIL || targetLiquidity.getWalletType() == WalletType.USER_RETAIL) {
+            throw new IllegalArgumentException("Treasury operations cannot involve retail wallets.");
+        }
+
         // Create an audit transaction for the rebalance
         Transaction auditTx = Transaction.builder()
                 .sender(adminUser)
@@ -61,9 +67,9 @@ public class AdminTreasuryService {
                 .grossAmount(request.withdrawAmount())
                 .netAmount(request.withdrawAmount())
                 .destinationAmount(request.depositAmount())
-                .usdNormalizationRate(BigDecimal.ONE) // Mocked for internal transfer
-                .fxRateApplied(BigDecimal.ONE)        // Mocked for internal transfer
-                .gatewayReference("TREASURY-REBALANCE")
+                .usdNormalizationRate(BigDecimal.ONE) // Internal transfer baseline
+                .fxRateApplied(BigDecimal.ONE)        // Internal transfer baseline
+                .gatewayReference("TREASURY-REBALANCE-" + UUID.randomUUID())
                 .status(TransactionStatus.COMPLETED)
                 .idempotencyKey(UUID.randomUUID())
                 .build();

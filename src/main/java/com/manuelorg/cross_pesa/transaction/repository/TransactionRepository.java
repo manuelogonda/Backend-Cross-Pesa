@@ -55,6 +55,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     long countByStatusIn(List<TransactionStatus> statuses);
 
+    long countByStatusAndCreatedAtAfter(TransactionStatus status, OffsetDateTime date);
+
     /**
      * Calculates Gross Revenue (Total Fees collected).
      * Parameterized the status to strictly enforce the TransactionStatus Enum type.
