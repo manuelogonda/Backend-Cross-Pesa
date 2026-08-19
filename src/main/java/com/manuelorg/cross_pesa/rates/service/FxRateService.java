@@ -5,19 +5,16 @@ import com.manuelorg.cross_pesa.rates.dto.FxRateResponse;
 import com.manuelorg.cross_pesa.rates.dto.OpenExchangeRatesResponse;
 import com.manuelorg.cross_pesa.rates.entity.FxRate;
 import com.manuelorg.cross_pesa.rates.repository.FxRepository;
-import com.manuelorg.cross_pesa.wallet.enums.Currency;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
-import java.util.Map;
 
 @Slf4j
 @Service
@@ -25,23 +22,32 @@ import java.util.Map;
 public class FxRateService {
 
     private final FxRepository fxRateRepository;
-    private final OpenExchangeRatesClient openExchangeRatesClient; // Your Feign or RestClient
+    private final OpenExchangeRatesClient openExchangeRatesClient;
 
     /**
      * Gets a live quote for any currency pair.
      * If the rate is missing or expired in the database, it calculates the cross-rate.
      */
+    @Transactional
     public FxRateResponse getLiveQuote(String sourceCurrency, String destinationCurrency) {
-        if (sourceCurrency.equals(destinationCurrency)) {
-            return new FxRateResponse(sourceCurrency, destinationCurrency, BigDecimal.ONE, OffsetDateTime.now().plusYears(1));
+        if (sourceCurrency == null || sourceCurrency.isBlank() || destinationCurrency == null || destinationCurrency.isBlank()) {
+            throw new IllegalArgumentException("Source and destination currencies cannot be null or blank");
+        }
+
+        String source = sourceCurrency.trim().toUpperCase();
+        String destination = destinationCurrency.trim().toUpperCase();
+
+        if (source.equals(destination)) {
+            return new FxRateResponse(source, destination, BigDecimal.ONE, OffsetDateTime.now().plusYears(1));
         }
 
         OffsetDateTime now = OffsetDateTime.now();
 
         // 1. Check database for an active, unexpired rate
         FxRate activeRate = fxRateRepository.findFirstBySourceCurrencyAndDestinationCurrencyAndExpiresAtAfterOrderByExpiresAtDesc(
-                sourceCurrency, destinationCurrency, now
-        ).orElseGet(() -> fetchAndCalculateCrossRate(sourceCurrency, destinationCurrency, now));
+                source, destination, now
+        ).orElseGet(() -> fetchAndCalculateCrossRate(source, destination, now));
+
         return FxRateResponse.fromEntity(activeRate);
     }
 
@@ -53,18 +59,24 @@ public class FxRateService {
 
         // Fetch the raw JSON map from Open Exchange Rates (Base is strictly USD)
         OpenExchangeRatesResponse response = openExchangeRatesClient.getLatestRates();
+        if (response == null || response.rates() == null) {
+            throw new IllegalStateException("Received empty exchange rates response from provider");
+        }
 
         // Open Exchange Rates free tier omits "USD": 1.0 from the map, so handle it explicitly
-        BigDecimal sourceRateFromUsd = sourceCurrency.equals("USD")
+        BigDecimal sourceRateFromUsd = "USD".equals(sourceCurrency)
                 ? BigDecimal.ONE
                 : response.rates().get(sourceCurrency);
 
-        BigDecimal destRateFromUsd = destinationCurrency.equals("USD")
+        BigDecimal destRateFromUsd = "USD".equals(destinationCurrency)
                 ? BigDecimal.ONE
                 : response.rates().get(destinationCurrency);
 
-        if (sourceRateFromUsd == null || destRateFromUsd == null) {
-            throw new IllegalArgumentException("Unsupported currency pair requested: " + sourceCurrency + " -> " + destinationCurrency);
+        if (sourceRateFromUsd == null) {
+            throw new IllegalArgumentException("Unsupported or missing source currency rate for: " + sourceCurrency);
+        }
+        if (destRateFromUsd == null) {
+            throw new IllegalArgumentException("Unsupported or missing destination currency rate for: " + destinationCurrency);
         }
 
         // --- CROSS RATE MATH ---
@@ -82,11 +94,12 @@ public class FxRateService {
 
         return fxRateRepository.save(newRate);
     }
+
     /**
      * Fetches a paginated history of exchange rates stored in the database.
      */
-    @org.springframework.transaction.annotation.Transactional(readOnly = true)
-    public org.springframework.data.domain.Page<FxRateResponse> getRateHistory(org.springframework.data.domain.Pageable pageable) {
+    @Transactional(readOnly = true)
+    public Page<FxRateResponse> getRateHistory(Pageable pageable) {
         return fxRateRepository.findAll(pageable)
                 .map(FxRateResponse::fromEntity);
     }

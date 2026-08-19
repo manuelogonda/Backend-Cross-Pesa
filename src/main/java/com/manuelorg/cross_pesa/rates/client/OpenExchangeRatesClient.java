@@ -1,11 +1,15 @@
 package com.manuelorg.cross_pesa.rates.client;
 
 import com.manuelorg.cross_pesa.rates.dto.OpenExchangeRatesResponse;
+import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+
+import java.util.Arrays;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -13,17 +17,19 @@ public class OpenExchangeRatesClient {
 
     private final RestClient restClient;
     private final String appId;
+    private final String supportedSymbols;
 
-    // REMOVED RestClient.Builder from the parameters!
     public OpenExchangeRatesClient(
             @Value("${cross-pesa.fx.oer.app-id}") String appId,
             @Value("${cross-pesa.fx.oer.base-url:https://openexchangerates.org/api}") String baseUrl) {
 
-        // Use the static factory method RestClient.builder() instead
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .build();
         this.appId = appId;
+        this.supportedSymbols = Arrays.stream(Currency.values())
+                .map(Enum::name)
+                .collect(Collectors.joining(","));
     }
 
     /**
@@ -38,8 +44,7 @@ public class OpenExchangeRatesClient {
                     .uri(uriBuilder -> uriBuilder
                             .path("/latest.json")
                             .queryParam("app_id", appId)
-                            // Optionally request specific symbols to save bandwidth:
-                            // .queryParam("symbols", "GBP,KES,EUR,CNY,JPY,CAD,AUD,PKR,AED,SAR,SEK")
+                            .queryParam("symbols", supportedSymbols)
                             .build())
                     .retrieve()
                     .body(OpenExchangeRatesResponse.class);

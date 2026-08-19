@@ -20,6 +20,14 @@
 - Use `findTopByWalletIdOrderByCreatedAtDescIdDesc` to get current balance.
 - Lock wallets in deterministic UUID order to avoid deadlocks.
 
+## FX Rates Module
+
+- Provider: Open Exchange Rates (free tier, USD base only).
+- Cross-rate formula: (USD→DEST) / (USD→SOURCE), scale 6, HALF_UP.
+- Rates cached in fx_rates with ~15 minute TTL.
+- getLiveQuote(source, destination) is the single entry point used by the fee engine and transactions.
+- Same-currency pairs always return rate = 1.
+
 ### Transaction Module
 - Fee engine produces QuoteResult (gross, markup, routing, net, payout).
 - Ledger legs (principal + markup + routing) are posted in the same transaction.
