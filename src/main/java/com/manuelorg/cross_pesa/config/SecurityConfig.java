@@ -63,6 +63,9 @@ public class SecurityConfig {
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
                         // Flutterwave webhook — called by Flutterwave servers, no JWT
                         .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/flutterwave").permitAll()
+                        // Actuator: liveness/readiness public, everything else admin-only
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
                         //admin
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         // All other endpoints require a valid JWT

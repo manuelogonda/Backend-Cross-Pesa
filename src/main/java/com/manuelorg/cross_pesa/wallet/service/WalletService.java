@@ -57,7 +57,12 @@ public class WalletService {
                 .build();
 
         Wallet savedWallet = walletRepository.save(wallet);
-        log.info("Successfully provisioned primary {} retail wallet for user ID: {}", currency, user.getId());
+        log.atInfo()
+                .addKeyValue("event", "wallet.provisioned")
+                .addKeyValue("walletId", savedWallet.getId())
+                .addKeyValue("userId", user.getId())
+                .addKeyValue("currency", currency)
+                .log("Provisioned primary retail wallet");
 
         return WalletResponse.fromEntity(savedWallet);
     }
@@ -79,7 +84,11 @@ public class WalletService {
 
         // 2. Idempotency check — if this reference was already processed, return current wallet state
         if (transactionRepository.findByGatewayReference(reference).isPresent()) {
-            log.info("Duplicate gateway reference '{}' detected — returning current wallet state (idempotent).", reference);
+            log.atInfo()
+                    .addKeyValue("event", "wallet.topup.duplicate")
+                    .addKeyValue("userId", userId)
+                    .addKeyValue("reference", reference)
+                    .log("Duplicate gateway reference detected; returning current wallet state (idempotent)");
             Wallet current = walletRepository.findByUserIdAndWalletType(userId, WalletType.USER_RETAIL)
                     .orElseThrow(() -> new IllegalArgumentException("Retail wallet not found for user ID: " + userId));
             return WalletResponse.fromEntity(current);
@@ -121,7 +130,14 @@ public class WalletService {
 
         // 8. Re-fetch to return the updated balance projection
         Wallet updatedWallet = walletRepository.findById(wallet.getId()).orElseThrow();
-        log.info("Credited {} {} to retail wallet of user ID: {} (ref={})", amount, currency, userId, reference);
+        log.atInfo()
+                .addKeyValue("event", "wallet.credited")
+                .addKeyValue("walletId", updatedWallet.getId())
+                .addKeyValue("userId", userId)
+                .addKeyValue("amount", amount)
+                .addKeyValue("currency", currency)
+                .addKeyValue("reference", reference)
+                .log("Credited retail wallet");
 
         return WalletResponse.fromEntity(updatedWallet);
     }

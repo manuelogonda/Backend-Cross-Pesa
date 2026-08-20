@@ -1,6 +1,6 @@
 package com.manuelorg.cross_pesa.payment.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.manuelorg.cross_pesa.payment.dto.FlutterwaveWebhookPayload;
 import com.manuelorg.cross_pesa.payment.service.FlutterwaveService;
 import com.manuelorg.cross_pesa.payment.service.FlutterwaveWebhookService;

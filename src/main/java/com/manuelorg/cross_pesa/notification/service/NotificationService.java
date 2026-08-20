@@ -59,7 +59,10 @@ public class NotificationService {
         UUID idempotencyKey = UUID.nameUUIDFromBytes(idKeySource.getBytes());
 
         if (notificationRepository.findByIdempotencyKey(idempotencyKey).isPresent()) {
-            log.warn("Notification already processed for key: {}", idempotencyKey);
+            log.atWarn()
+                    .addKeyValue("event", "notification.duplicate")
+                    .addKeyValue("idempotencyKey", idempotencyKey)
+                    .log("Notification already processed for idempotency key");
             return;
         }
 
@@ -90,19 +93,44 @@ public class NotificationService {
     @Async
     public void dispatchExternalNotification(Notification notification, User user) {
         try {
-            switch (notification.getNotificationType()) {
-                case SMS -> {
-                    if (user.getPhoneNumber() == null || user.getPhoneNumber().isBlank()) {
-                        throw new IllegalArgumentException("User phone number is missing for SMS notification");
-                    }
-                    sendAfricasTalkingSms(user.getPhoneNumber(), notification.getMessage());
-                }
-                case EMAIL -> sendSendGridEmail(user.getEmail(), notification.getTitle(), notification.getMessage());
-                case IN_APP -> log.info("In-app notification saved.");
-            }
+            doDispatch(notification, user);
         } catch (Exception e) {
-            log.error("Failed to dispatch notification ID: {}", notification.getId(), e);
+            log.atError()
+                    .addKeyValue("event", "notification.dispatch.failed")
+                    .addKeyValue("notificationId", notification.getId())
+                    .addKeyValue("notificationType", notification.getNotificationType())
+                    .setCause(e)
+                    .log("Failed to dispatch notification");
             recordDispatchFailure(notification.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Synchronous dispatch entrypoint used by the {@code NotificationPoller}.
+     * Loads the notification (and its user) within a transaction and delegates to
+     * the shared dispatch body, letting exceptions propagate so the caller can
+     * apply its own per-item error handling.
+     */
+    @Transactional
+    public void dispatch(UUID notificationId) {
+        Notification notification = notificationRepository.findById(notificationId)
+                .orElseThrow(() -> new IllegalArgumentException("Notification not found: " + notificationId));
+        User user = notification.getUser();
+        // Force lazy initialization while the transaction is still open
+        user.getId();
+        doDispatch(notification, user);
+    }
+
+    private void doDispatch(Notification notification, User user) {
+        switch (notification.getNotificationType()) {
+            case SMS -> {
+                if (user.getPhoneNumber() == null || user.getPhoneNumber().isBlank()) {
+                    throw new IllegalArgumentException("User phone number is missing for SMS notification");
+                }
+                sendAfricasTalkingSms(notification.getId(), user.getPhoneNumber(), notification.getMessage());
+            }
+            case EMAIL -> sendSendGridEmail(notification.getId(), user.getEmail(), notification.getTitle(), notification.getMessage());
+            case IN_APP -> log.info("In-app notification saved.");
         }
     }
 
@@ -116,15 +144,23 @@ public class NotificationService {
                 notificationRepository.save(n);
             });
         } catch (Exception ex) {
-            log.error("Failed to update retry count and error message for notification ID: {}", notificationId, ex);
+            log.atError()
+                    .addKeyValue("event", "notification.retry.update.failed")
+                    .addKeyValue("notificationId", notificationId)
+                    .setCause(ex)
+                    .log("Failed to update retry count and error message");
         }
     }
 
     /**
      * Executes the Africa's Talking SMS API call.
      */
-    private void sendAfricasTalkingSms(String phone, String message) {
-        log.info("Initiating Africa's Talking SMS to {}", phone);
+    private void sendAfricasTalkingSms(UUID notificationId, String phone, String message) {
+        log.atInfo()
+                .addKeyValue("event", "notification.sms.initiated")
+                .addKeyValue("notificationId", notificationId)
+                .addKeyValue("provider", "africastalking")
+                .log("Initiating SMS dispatch");
 
         try {
             String formattedPhone = normalizeToE164(phone);
@@ -135,13 +171,27 @@ public class NotificationService {
             List<Recipient> responses = sms.send(message, new String[]{formattedPhone}, true);
 
             for (Recipient recipient : responses) {
-                log.info("SMS Status for {}: {}", recipient.number, recipient.status);
+                log.atInfo()
+                        .addKeyValue("event", "notification.sms.status")
+                        .addKeyValue("notificationId", notificationId)
+                        .addKeyValue("status", recipient.status)
+                        .addKeyValue("messageId", recipient.messageId)
+                        .log("SMS provider status");
                 if (recipient.status.equalsIgnoreCase("Failed") || recipient.status.equalsIgnoreCase("Rejected")) {
-                    log.error("Africa's Talking rejected the SMS. Cost: {}, MessageId: {}", recipient.cost, recipient.messageId);
+                    log.atError()
+                            .addKeyValue("event", "notification.sms.rejected")
+                            .addKeyValue("notificationId", notificationId)
+                            .addKeyValue("cost", recipient.cost)
+                            .addKeyValue("messageId", recipient.messageId)
+                            .log("Africa's Talking rejected the SMS");
                 }
             }
         } catch (Exception e) {
-            log.error("Critical error while sending Africa's Talking SMS to {}. Reason: {}", phone, e.getMessage(), e);
+            log.atError()
+                    .addKeyValue("event", "notification.sms.error")
+                    .addKeyValue("notificationId", notificationId)
+                    .setCause(e)
+                    .log("Critical error while sending Africa's Talking SMS");
             throw new RuntimeException("Africa's Talking API failure", e);
         }
     }
@@ -157,8 +207,12 @@ public class NotificationService {
         return "+" + cleaned;
     }
 
-    private void sendSendGridEmail(String email, String subject, String body) {
-        log.info("Mocking SendGrid Email to {}. Subject: {}", email, subject);
+    private void sendSendGridEmail(UUID notificationId, String email, String subject, String body) {
+        log.atInfo()
+                .addKeyValue("event", "notification.email.initiated")
+                .addKeyValue("notificationId", notificationId)
+                .addKeyValue("provider", "sendgrid")
+                .log("Mocking SendGrid email dispatch");
         // TODO: Implement SendGrid SDK logic here
     }
 

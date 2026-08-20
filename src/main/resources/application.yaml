@@ -60,6 +60,19 @@ spring:
     compose:
       enabled: true
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,loggers,httpexchanges,scheduledtasks
+        exclude: env,beans
+  endpoint:
+    health:
+      show-details: when-authorized
+  httpexchanges:
+    recording:
+      include: request-headers,response-headers,principal,remote-address,session-id,time-taken
+
 # 5. Custom App Security Configuration (Top-level root block)
 application:
   security:

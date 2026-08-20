@@ -125,8 +125,14 @@ public class TransactionService {
                 quote.routingPair(), quote.markupTiersApplied(), quote.usdBaselineAmount()
         );
 
-        log.info("Cross-Border Remittance initiated: {} {} → {} (tx={})",
-                quote.amountSent(), request.sourceCurrency(), request.destinationCurrency(), savedTransaction.getId());
+        log.atInfo()
+                .addKeyValue("event", "remittance.initiated")
+                .addKeyValue("transactionId", savedTransaction.getId())
+                .addKeyValue("userId", currentUser.getId())
+                .addKeyValue("amount", quote.amountSent())
+                .addKeyValue("sourceCurrency", request.sourceCurrency())
+                .addKeyValue("destinationCurrency", request.destinationCurrency())
+                .log("Cross-border remittance initiated");
 
         return SendMoneyResponse.fromEntity(savedTransaction);
     }
@@ -205,8 +211,14 @@ public class TransactionService {
         // 7. Post all P2P ledger legs with correct running balanceAfter
         recordP2PLedgerEntries(savedTransaction, sourceWallet, destinationWallet, quote);
 
-        log.info("P2P Transfer completed: {} {} → {} (tx={})",
-                quote.amountSent(), request.sourceCurrency(), request.destinationCurrency(), savedTransaction.getId());
+        log.atInfo()
+                .addKeyValue("event", "p2p.completed")
+                .addKeyValue("transactionId", savedTransaction.getId())
+                .addKeyValue("userId", currentUser.getId())
+                .addKeyValue("amount", quote.amountSent())
+                .addKeyValue("sourceCurrency", request.sourceCurrency())
+                .addKeyValue("destinationCurrency", request.destinationCurrency())
+                .log("P2P transfer completed");
 
         return ExchangeResponse.fromEntity(savedTransaction);
     }
