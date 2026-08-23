@@ -39,6 +39,11 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
     Page<LedgerEntry> findByEntryClass(EntryClass entryClass, Pageable pageable);
 
     /**
+     * Idempotency guard for reversals: has a refund already been posted for this transaction?
+     */
+    boolean existsByTransactionIdAndEntryClass(UUID transactionId, EntryClass entryClass);
+
+    /**
      * Audit Query: Fetches ledger movements for a wallet within a custom date range.
      */
     @Query("SELECT l FROM LedgerEntry l WHERE l.wallet.id = :walletId AND l.createdAt BETWEEN :startDate AND :endDate ORDER BY l.createdAt DESC")

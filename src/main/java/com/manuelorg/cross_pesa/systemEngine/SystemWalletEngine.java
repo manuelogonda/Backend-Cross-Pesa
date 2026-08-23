@@ -218,6 +218,119 @@ public class SystemWalletEngine {
     }
 
     /**
+     * Reverses a failed outbound cross-border payout by mirroring every leg
+     * posted by {@link #executeCrossBorderSettlement} in the opposite direction,
+     * keeping the double-entry books balanced:
+     *
+     *  - User wallet: CREDITED principal + markup + routing (full refund)
+     *  - Markup / routing system wallets: DEBITED back their revenue
+     *  - Source liquidity pool: DEBITED the inbound clearing float
+     *  - Target liquidity pool: CREDITED back the undelivered local float
+     *
+     * Idempotent: if a REFUND entry already exists for this transaction, no-op.
+     * Wallets are locked in deterministic UUID order to prevent deadlocks.
+     */
+    @Transactional
+    public void executePayoutReversal(
+            Transaction transaction,
+            UUID userWalletId,
+            Currency sourceCurrency,
+            BigDecimal principal,
+            BigDecimal markupFee,
+            BigDecimal routingFee,
+            Currency targetCurrency,
+            BigDecimal targetPayoutAmount,
+            String routingPair) {
+
+        if (ledgerEntryRepository.existsByTransactionIdAndEntryClass(transaction.getId(), EntryClass.REFUND)) {
+            log.info("Reversal already posted for transaction {}; skipping.", transaction.getId());
+            return;
+        }
+
+        // 1. Resolve all wallet IDs, then lock in deterministic UUID order
+        UUID markupWalletId = getSystemWallet(sourceCurrency, WalletType.SYSTEM_MARKUP).getId();
+        UUID routingWalletId = getSystemWallet(sourceCurrency, WalletType.SYSTEM_ROUTING).getId();
+        UUID sourceLiquidityId = getSystemWallet(sourceCurrency, WalletType.SYSTEM_LIQUIDITY).getId();
+        UUID targetLiquidityId = getSystemWallet(targetCurrency, WalletType.SYSTEM_LIQUIDITY).getId();
+
+        List<UUID> lockOrder = new ArrayList<>(List.of(
+                userWalletId, markupWalletId, routingWalletId, sourceLiquidityId, targetLiquidityId));
+        lockOrder.sort(Comparator.naturalOrder());
+
+        for (UUID id : lockOrder) {
+            lockAndGetWallet(id);
+        }
+
+        Wallet lockedUserWallet = lockAndGetWallet(userWalletId);
+        Wallet markupWallet = lockAndGetWallet(markupWalletId);
+        Wallet routingWallet = lockAndGetWallet(routingWalletId);
+        Wallet sourceLiquidityWallet = lockAndGetWallet(sourceLiquidityId);
+        Wallet targetLiquidityWallet = lockAndGetWallet(targetLiquidityId);
+
+        List<LedgerEntry> entries = new ArrayList<>();
+
+        // --- 2. DERIVE CURRENT BALANCES FROM LEDGER (source of truth) ---
+        BigDecimal userCurrentBalance = getCurrentBalance(lockedUserWallet);
+        BigDecimal markupCurrentBalance = getCurrentBalance(markupWallet);
+        BigDecimal routingCurrentBalance = getCurrentBalance(routingWallet);
+        BigDecimal sourceLiqCurrentBalance = getCurrentBalance(sourceLiquidityWallet);
+        BigDecimal targetLiqCurrentBalance = getCurrentBalance(targetLiquidityWallet);
+
+        String descPrefix = "REVERSAL of failed payout";
+        BigDecimal totalUserRefund = principal.add(markupFee).add(routingFee);
+
+        // --- 3. USER REFUND LEG ---
+        BigDecimal userNewBalance = userCurrentBalance.add(totalUserRefund);
+        entries.add(buildLeg(transaction, lockedUserWallet, EntryClass.REFUND,
+                BigDecimal.ZERO, totalUserRefund, sourceCurrency,
+                descPrefix + " — full refund to customer", routingPair, "NONE", null, userNewBalance));
+
+        // --- 4. CLAW BACK SYSTEM REVENUE ---
+        BigDecimal markupNewBalance = markupCurrentBalance;
+        if (markupFee.compareTo(BigDecimal.ZERO) > 0) {
+            markupNewBalance = markupCurrentBalance.subtract(markupFee);
+            entries.add(buildLeg(transaction, markupWallet, EntryClass.MARKUP_FEE,
+                    markupFee, BigDecimal.ZERO, sourceCurrency,
+                    descPrefix + " — markup fee clawback", routingPair, "NONE", null, markupNewBalance));
+        }
+
+        BigDecimal routingNewBalance = routingCurrentBalance;
+        if (routingFee.compareTo(BigDecimal.ZERO) > 0) {
+            routingNewBalance = routingCurrentBalance.subtract(routingFee);
+            entries.add(buildLeg(transaction, routingWallet, EntryClass.ROUTING_FEE,
+                    routingFee, BigDecimal.ZERO, sourceCurrency,
+                    descPrefix + " — routing fee clawback", routingPair, "NONE", null, routingNewBalance));
+        }
+
+        // --- 5. REVERSE FX CLEARING POOLS ---
+        BigDecimal sourceLiqNewBalance = sourceLiqCurrentBalance.subtract(principal);
+        entries.add(buildLeg(transaction, sourceLiquidityWallet, EntryClass.FX_CLEARING,
+                principal, BigDecimal.ZERO, sourceCurrency,
+                descPrefix + " — release inbound clearing float", routingPair, "NONE", null, sourceLiqNewBalance));
+
+        BigDecimal targetLiqNewBalance = targetLiqCurrentBalance.add(targetPayoutAmount);
+        entries.add(buildLeg(transaction, targetLiquidityWallet, EntryClass.FX_CLEARING,
+                BigDecimal.ZERO, targetPayoutAmount, targetCurrency,
+                descPrefix + " — restore undelivered local float", routingPair, "NONE", null, targetLiqNewBalance));
+
+        // --- 6. PERSIST LEDGER ENTRIES FIRST, THEN PROJECTIONS ---
+        ledgerEntryRepository.saveAll(entries);
+        lockedUserWallet.setBalance(userNewBalance);
+        markupWallet.setBalance(markupNewBalance);
+        routingWallet.setBalance(routingNewBalance);
+        sourceLiquidityWallet.setBalance(sourceLiqNewBalance);
+        targetLiquidityWallet.setBalance(targetLiqNewBalance);
+        walletRepository.saveAll(List.of(
+                lockedUserWallet, markupWallet, routingWallet, sourceLiquidityWallet, targetLiquidityWallet));
+
+        entityManager.flush();
+        entityManager.clear();
+
+        log.info("Executed balanced payout reversal for Transaction {} — refunded {} {} to wallet {}",
+                transaction.getId(), totalUserRefund, sourceCurrency, lockedUserWallet.getId());
+    }
+
+    /**
      * Executes treasury rebalancing between system liquidity wallets with correct running balanceAfter.
      * Wallets are locked in deterministic UUID order to prevent deadlocks.
      */
