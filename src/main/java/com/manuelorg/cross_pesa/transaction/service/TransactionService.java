@@ -48,6 +48,7 @@ public class TransactionService {
     private final FraudDetectionService fraudDetectionService;
     private final SystemWalletEngine systemWalletEngine;
     private final LedgerEntryRepository ledgerEntryRepository;
+    private final com.manuelorg.cross_pesa.ledger.service.LedgerEntrySequencer ledgerEntrySequencer;
     private final EntityManager entityManager;
 
     /**
@@ -86,8 +87,7 @@ public class TransactionService {
         );
 
         // 5. Available balance check under the lock — prefer ledger, fall back to wallet cache
-        BigDecimal availableBalance = getCurrentBalance(sourceWallet).subtract(
-                sourceWallet.getLockedBalance() != null ? sourceWallet.getLockedBalance() : BigDecimal.ZERO);
+        BigDecimal availableBalance = getAvailableBalance(sourceWallet);
         if (availableBalance.compareTo(quote.amountSent()) < 0) {
             throw new IllegalStateException("Insufficient funds. Available: " + availableBalance);
         }
@@ -193,8 +193,7 @@ public class TransactionService {
         );
 
         // 5. Available balance check under the lock — prefer ledger, fall back to wallet cache
-        BigDecimal availableBalance = getCurrentBalance(sourceWallet).subtract(
-                sourceWallet.getLockedBalance() != null ? sourceWallet.getLockedBalance() : BigDecimal.ZERO);
+        BigDecimal availableBalance = getAvailableBalance(sourceWallet);
         if (availableBalance.compareTo(quote.amountSent()) < 0) {
             throw new IllegalStateException("Insufficient funds for P2P transfer. Available: " + availableBalance);
         }
@@ -334,6 +333,7 @@ public class TransactionService {
                                    BigDecimal debit, BigDecimal credit, QuoteResult quote,
                                    String desc, BigDecimal balanceAfter) {
         return LedgerEntry.builder()
+                .entrySeq(ledgerEntrySequencer.next())
                 .transaction(tx)
                 .wallet(wallet)
                 .entryClass(entryClass)
@@ -352,9 +352,20 @@ public class TransactionService {
      * Derives the current balance for a wallet from the most recent ledger entry.
      * Falls back to the wallet's cached balance field if no ledger entries exist yet.
      */
+
+    /**
+     * Single canonical definition of "available balance": ledger-derived balance
+     * minus locked funds, clamped at zero — identical semantics to
+     * Wallet.getAvailableBalance().
+     */
+    private BigDecimal getAvailableBalance(Wallet wallet) {
+        BigDecimal locked = wallet.getLockedBalance() != null ? wallet.getLockedBalance() : BigDecimal.ZERO;
+        return getCurrentBalance(wallet).subtract(locked).max(BigDecimal.ZERO);
+    }
+
     private BigDecimal getCurrentBalance(Wallet wallet) {
         return ledgerEntryRepository
-                .findTopByWalletIdOrderByCreatedAtDescIdDesc(wallet.getId())
+                .findTopByWalletIdOrderByEntrySeqDesc(wallet.getId())
                 .map(LedgerEntry::getBalanceAfter)
                 .orElse(wallet.getBalance());
     }

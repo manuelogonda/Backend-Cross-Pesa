@@ -49,6 +49,9 @@ class LedgerServiceTest {
     @Mock
     private EntityManager entityManager;
 
+    @Mock
+    private com.manuelorg.cross_pesa.ledger.service.LedgerEntrySequencer ledgerEntrySequencer;
+
     private LedgerService ledgerService;
 
     private Transaction transaction;
@@ -58,14 +61,15 @@ class LedgerServiceTest {
 
     @BeforeEach
     void setUp() {
-        ledgerService = new LedgerService(ledgerEntryRepository, walletRepository, entityManager);
+        ledgerService = new LedgerService(ledgerEntryRepository, walletRepository, ledgerEntrySequencer, entityManager);
+        org.mockito.Mockito.lenient().when(ledgerEntrySequencer.next()).thenReturn(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L);
 
         transaction = new Transaction();
         sourceWallet = retailWallet(new BigDecimal("1000.0000"));
         targetWallet = retailWallet(BigDecimal.ZERO);
 
         // Default: no prior ledger history -> balance derivation falls back to wallet cache
-        lenient().when(ledgerEntryRepository.findTopByWalletIdOrderByCreatedAtDescIdDesc(any(UUID.class)))
+        lenient().when(ledgerEntryRepository.findTopByWalletIdOrderByEntrySeqDesc(any(UUID.class)))
                 .thenReturn(Optional.empty());
         lenient().when(walletRepository.findByIdWithLock(any(UUID.class)))
                 .thenAnswer(invocation -> {
@@ -149,7 +153,7 @@ class LedgerServiceTest {
                 .wallet(sourceWallet)
                 .balanceAfter(new BigDecimal("500.0000"))
                 .build();
-        when(ledgerEntryRepository.findTopByWalletIdOrderByCreatedAtDescIdDesc(sourceWallet.getId()))
+        when(ledgerEntryRepository.findTopByWalletIdOrderByEntrySeqDesc(sourceWallet.getId()))
                 .thenReturn(Optional.of(lastKnown));
 
         ledgerService.recordSimpleTransfer(

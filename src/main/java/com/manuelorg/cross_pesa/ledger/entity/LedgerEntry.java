@@ -26,6 +26,17 @@ public class LedgerEntry {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
+    /**
+     * Monotonic sequence assigned from a DB sequence before insert.
+     * Unlike the random UUID id or created_at (which can collide within one
+     * millisecond for multi-leg inserts), this guarantees a stable total order
+     * so "latest entry per wallet" balance derivation is always correct.
+     * Allocated by LedgerEntrySequencer; the database also carries a
+     * nextval() DEFAULT as a safety net.
+     */
+    @Column(name = "entry_seq", unique = true, updatable = false)
+    private Long entrySeq;
+
     // --- RELATIONS ---
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

@@ -105,6 +105,11 @@ class TransactionServiceIntegrationTest {
 
     @BeforeEach
     void seed() {
+        // ddl-auto owns the throwaway schema, so the entry_seq sequence (created
+        // by Flyway V4 / schema.sql in real environments) must be provisioned here
+        jdbcTemplate.execute(
+                "CREATE SEQUENCE IF NOT EXISTS ledger_entries_entry_seq_seq AS BIGINT START WITH 1 INCREMENT BY 1");
+
         sender = userRepository.save(User.builder()
                 .firstName("Emmanuel").lastName("Odhiambo")
                 .email("sender-" + UUID.randomUUID() + "@crosspesa.dev")

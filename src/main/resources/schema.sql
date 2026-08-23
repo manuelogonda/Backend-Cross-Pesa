@@ -10,6 +10,9 @@ BEGIN
 END
 $$ LANGUAGE plpgsql^^
 
+-- Sequence for ledger entry insert ordering (see ledger_entries.entry_seq)
+CREATE SEQUENCE IF NOT EXISTS ledger_entries_entry_seq_seq AS BIGINT START WITH 1 INCREMENT BY 1;
+
 -- 1. USERS
 CREATE TABLE IF NOT EXISTS users (
     id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -279,6 +282,9 @@ CREATE TABLE IF NOT EXISTS ledger_entries
 (
     id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
+    -- Monotonic insert order for correct "latest entry" balance derivation
+    entry_seq            BIGINT NOT NULL DEFAULT nextval('ledger_entries_entry_seq_seq') UNIQUE,
+
     transaction_id       UUID NOT NULL
         REFERENCES transactions (id) ON DELETE RESTRICT,
 
@@ -453,6 +459,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id);
 CREATE INDEX idx_ledger_wallet ON ledger_entries (wallet_id);
 CREATE INDEX idx_ledger_transaction ON ledger_entries (transaction_id);
 CREATE INDEX idx_ledger_created_at ON ledger_entries (created_at);
+CREATE INDEX idx_ledger_entries_wallet_seq ON ledger_entries (wallet_id, entry_seq DESC);
 CREATE INDEX idx_kyc_smile_job_id ON kyc_submissions(smile_job_id);
 CREATE INDEX idx_kyc_user_id ON kyc_submissions(user_id);
 CREATE INDEX idx_kyc_status ON kyc_submissions(status);

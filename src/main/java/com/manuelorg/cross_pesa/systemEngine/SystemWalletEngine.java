@@ -29,6 +29,7 @@ public class SystemWalletEngine {
 
     private final WalletRepository walletRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
+    private final com.manuelorg.cross_pesa.ledger.service.LedgerEntrySequencer ledgerEntrySequencer;
     private final EntityManager entityManager;
 
     @PostConstruct
@@ -399,7 +400,7 @@ public class SystemWalletEngine {
      */
     private BigDecimal getCurrentBalance(Wallet wallet) {
         return ledgerEntryRepository
-                .findTopByWalletIdOrderByCreatedAtDescIdDesc(wallet.getId())
+                .findTopByWalletIdOrderByEntrySeqDesc(wallet.getId())
                 .map(LedgerEntry::getBalanceAfter)
                 .orElse(wallet.getBalance());
     }
@@ -415,6 +416,7 @@ public class SystemWalletEngine {
             String routingPair, String tiersApplied, BigDecimal usdBaseline, BigDecimal balanceAfter) {
 
         return LedgerEntry.builder()
+                .entrySeq(ledgerEntrySequencer.next())
                 .transaction(tx)
                 .wallet(wallet)
                 .entryClass(entryClass)

@@ -26,7 +26,7 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
      * Fetches the most recent ledger entry for a wallet — used to derive the current balance
      * without relying on the wallet balance cache.
      */
-    Optional<LedgerEntry> findTopByWalletIdOrderByCreatedAtDescIdDesc(UUID walletId);
+    Optional<LedgerEntry> findTopByWalletIdOrderByEntrySeqDesc(UUID walletId);
 
     /**
      * Fetches all entries associated with a single parent Transaction (Audit view).

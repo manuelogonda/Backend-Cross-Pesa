@@ -29,6 +29,7 @@ public class LedgerService {
 
     private final LedgerEntryRepository ledgerEntryRepository;
     private final WalletRepository walletRepository;
+    private final LedgerEntrySequencer ledgerEntrySequencer;
     private final EntityManager entityManager;
 
     /**
@@ -81,6 +82,7 @@ public class LedgerService {
 
         // 5. Create DEBIT leg
         LedgerEntry debitEntry = LedgerEntry.builder()
+                .entrySeq(ledgerEntrySequencer.next())
                 .transaction(transaction)
                 .wallet(lockedSource)
                 .entryClass(entryClass)
@@ -93,6 +95,7 @@ public class LedgerService {
 
         // 6. Create CREDIT leg
         LedgerEntry creditEntry = LedgerEntry.builder()
+                .entrySeq(ledgerEntrySequencer.next())
                 .transaction(transaction)
                 .wallet(lockedTarget)
                 .entryClass(entryClass)
@@ -126,6 +129,7 @@ public class LedgerService {
         BigDecimal newBalance = currentBalance.add(amount);
 
         LedgerEntry depositEntry = LedgerEntry.builder()
+                .entrySeq(ledgerEntrySequencer.next())
                 .transaction(transaction)
                 .wallet(lockedTarget)
                 .entryClass(EntryClass.DEPOSIT)
@@ -152,7 +156,7 @@ public class LedgerService {
      */
     private BigDecimal getCurrentBalance(Wallet wallet) {
         return ledgerEntryRepository
-                .findTopByWalletIdOrderByCreatedAtDescIdDesc(wallet.getId())
+                .findTopByWalletIdOrderByEntrySeqDesc(wallet.getId())
                 .map(LedgerEntry::getBalanceAfter)
                 .orElse(wallet.getBalance());
     }
