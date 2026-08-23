@@ -43,6 +43,12 @@ public class GlobalExceptionHandler {
         return buildErrorResponse("Invalid email or password", HttpStatus.UNAUTHORIZED, request, null);
     }
 
+    // 4b. Handle duplicate idempotency keys (409 Conflict)
+    @ExceptionHandler(DuplicateTransactionException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicateTransaction(DuplicateTransactionException ex, HttpServletRequest request) {
+        return buildErrorResponse(ex.getMessage(), HttpStatus.CONFLICT, request, null);
+    }
+
     // 5. Handle DTO @Valid Failures (e.g., weak password, invalid email format)
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationExceptions(MethodArgumentNotValidException ex, HttpServletRequest request) {

@@ -6,6 +6,7 @@ import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
 import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
 import com.manuelorg.cross_pesa.ledger.repository.LedgerEntryRepository;
+import com.manuelorg.cross_pesa.exception.DuplicateTransactionException;
 import com.manuelorg.cross_pesa.rates.service.FxRateService;
 import com.manuelorg.cross_pesa.systemEngine.SystemWalletEngine;
 import com.manuelorg.cross_pesa.systemEngine.TransactionFeeEngineService;
@@ -22,6 +23,7 @@ import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -57,7 +59,7 @@ public class TransactionService {
     public SendMoneyResponse processSendMoney(User currentUser, TransactionRequest.SendMoneyRequest request) {
         // 1. Idempotency check first — cheapest guard
         if (transactionRepository.existsByIdempotencyKey(request.idempotencyKey())) {
-            throw new IllegalStateException("Duplicate transaction detected.");
+            throw new DuplicateTransactionException("Duplicate transaction detected.");
         }
 
         // 2. Fraud / KYC hard validation
@@ -116,7 +118,17 @@ public class TransactionService {
                 .idempotencyKey(request.idempotencyKey())
                 .build();
 
-        Transaction savedTransaction = transactionRepository.save(transaction);
+        // The existsByIdempotencyKey pre-check above is not atomic under concurrency;
+        // the DB unique index on idempotency_key is the real guard. Flush forces the
+        // constraint to be evaluated now so a lost race surfaces as a clean 409
+        // instead of a raw constraint violation after ledger legs were posted.
+        Transaction savedTransaction;
+        try {
+            savedTransaction = transactionRepository.save(transaction);
+            transactionRepository.flush();
+        } catch (DataIntegrityViolationException e) {
+            throw new DuplicateTransactionException("Duplicate transaction detected.");
+        }
 
         // 8. Immediately post all ledger legs in the same DB transaction
         systemWalletEngine.executeCrossBorderSettlement(
@@ -146,7 +158,7 @@ public class TransactionService {
     public ExchangeResponse processPeerToPeerTransfer(User currentUser, TransactionRequest.ExchangeFundsRequest request) {
         // 1. Idempotency check first
         if (transactionRepository.existsByIdempotencyKey(request.idempotencyKey())) {
-            throw new IllegalStateException("Duplicate transaction detected.");
+            throw new DuplicateTransactionException("Duplicate transaction detected.");
         }
 
         // 2. Fraud / KYC hard validation
@@ -206,7 +218,14 @@ public class TransactionService {
                 .idempotencyKey(request.idempotencyKey())
                 .build();
 
-        Transaction savedTransaction = transactionRepository.save(transaction);
+        // Same TOCTOU guard as processSendMoney: rely on the DB unique index.
+        Transaction savedTransaction;
+        try {
+            savedTransaction = transactionRepository.save(transaction);
+            transactionRepository.flush();
+        } catch (DataIntegrityViolationException e) {
+            throw new DuplicateTransactionException("Duplicate transaction detected.");
+        }
 
         // 7. Post all P2P ledger legs with correct running balanceAfter
         recordP2PLedgerEntries(savedTransaction, sourceWallet, destinationWallet, quote);

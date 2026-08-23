@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS transactions
     payout_reference      VARCHAR(150), -- Removed flat UNIQUE constraint
 
     status                VARCHAR(30)            NOT NULL DEFAULT 'PENDING'
-        CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED')),
+        CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED', 'FLAGGED')),
 
     idempotency_key       UUID UNIQUE            NOT NULL,
 

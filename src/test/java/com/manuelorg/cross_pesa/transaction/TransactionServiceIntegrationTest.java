@@ -1,6 +1,7 @@
 package com.manuelorg.cross_pesa.transaction;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
+import com.manuelorg.cross_pesa.exception.DuplicateTransactionException;
 import com.manuelorg.cross_pesa.auth.repository.UserRepository;
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
 import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
@@ -190,7 +191,7 @@ class TransactionServiceIntegrationTest {
 
         ExchangeResponse first = transactionService.processPeerToPeerTransfer(sender, request);
         assertThatThrownBy(() -> transactionService.processPeerToPeerTransfer(sender, request))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(DuplicateTransactionException.class)
                 .hasMessageContaining("Duplicate transaction detected");
 
         // Exactly one transaction persisted despite two attempts
