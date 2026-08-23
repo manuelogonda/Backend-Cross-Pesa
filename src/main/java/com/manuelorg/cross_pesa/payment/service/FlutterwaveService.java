@@ -46,8 +46,15 @@ public class FlutterwaveService {
 
     // Maps the verification response from Flutterwave
     public record FlutterwaveVerifyResponse(String status, String message, Data data) {
-        public record Data(String status, String amount, String currency, String tx_ref) {}
+        public record Data(String status, String amount, String currency, String tx_ref, Customer customer) {}
+        public record Customer(String email) {}
     }
+
+    /**
+     * Authoritative payment details as reported by Flutterwave.
+     * These values — never client-supplied ones — must be used to credit wallets.
+     */
+    public record VerifiedPayment(BigDecimal amount, String currency, String customerEmail) {}
 
     /**
      * Initialises a Flutterwave Standard checkout session.
@@ -113,15 +120,15 @@ public class FlutterwaveService {
         );
     }
 
-    public boolean verifyTransaction(String transactionId, String expectedAmount, String expectedCurrency) {
-        return verifyTransaction(transactionId, new BigDecimal(expectedAmount), expectedCurrency);
-    }
-
     /**
-     * Verifies the final status of a transaction with Flutterwave.
-     * Uses strict BigDecimal comparison to prevent floating-point precision errors.
+     * Verifies a transaction with Flutterwave and returns the gateway-reported
+     * payment details (amount, currency, payer email) if and only if the
+     * transaction is confirmed successful. Returns {@code null} otherwise.
+     *
+     * Callers MUST credit wallets using the returned values, never values
+     * supplied by the client.
      */
-    public boolean verifyTransaction(String transactionId, BigDecimal expectedAmount, String expectedCurrency) {
+    public VerifiedPayment verifyTransaction(String transactionId) {
         log.info("Verifying transaction {} with Flutterwave...", transactionId);
 
         try {
@@ -131,30 +138,25 @@ public class FlutterwaveService {
                     .retrieve()
                     .body(FlutterwaveVerifyResponse.class);
 
-            if (response != null && "success".equals(response.status())) {
+            if (response != null && "success".equals(response.status()) && response.data() != null) {
                 FlutterwaveVerifyResponse.Data data = response.data();
 
-                BigDecimal actual = new BigDecimal(data.amount());
-
-                boolean isSuccessful = "successful".equals(data.status());
-                boolean isCorrectAmount = expectedAmount.compareTo(actual) <= 0;
-                boolean isCorrectCurrency = expectedCurrency.equals(data.currency());
-
-                log.debug("Verification check — status={} amount_ok={} currency_ok={} (expected={}/{}, actual={}/{})",
-                        data.status(), isCorrectAmount, isCorrectCurrency,
-                        expectedAmount, expectedCurrency, data.amount(), data.currency());
-
-                if (isSuccessful && isCorrectAmount && isCorrectCurrency) {
-                    log.info("Transaction {} verified successfully.", transactionId);
-                    return true;
-                } else {
-                    log.warn("Transaction {} verification failed: status={}, amount_ok={}, currency_ok={}",
-                            transactionId, data.status(), isCorrectAmount, isCorrectCurrency);
+                if ("successful".equals(data.status())) {
+                    VerifiedPayment verified = new VerifiedPayment(
+                            new BigDecimal(data.amount()),
+                            data.currency(),
+                            data.customer() != null ? data.customer().email() : null
+                    );
+                    log.info("Transaction {} verified successfully: amount={} currency={}",
+                            transactionId, verified.amount(), verified.currency());
+                    return verified;
                 }
+
+                log.warn("Transaction {} verification failed: status={}", transactionId, data.status());
             }
         } catch (Exception e) {
             log.error("Verification call failed for transaction {}: {}", transactionId, e.getMessage());
         }
-        return false;
+        return null;
     }
 }

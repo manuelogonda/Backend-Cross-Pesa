@@ -75,38 +75,52 @@ public class WalletController {
     /**
      * POST /api/v1/wallets/verify
      * Verifies the Flutterwave transaction and credits the user's wallet.
-     * Protected against replay attacks via gateway reference idempotency check in WalletService.
      *
-     * NOTE: This endpoint is sandbox-only. In production, wallet credits must be driven
-     * by a verified webhook (signature-validated, async) — never by a client redirect.
+     * Security: the credited amount, currency and payer identity are taken
+     * exclusively from Flutterwave's verify API — client-supplied values are
+     * never trusted. Protected against replay via gateway reference idempotency
+     * in WalletService.
+     *
+     * NOTE: In production, wallet credits should be driven by a signature-validated
+     * webhook; this redirect-driven flow is a fallback for sandbox testing.
      */
     @PostMapping("/verify")
     public ResponseEntity<Map<String, String>> verifyTopUp(
             @RequestParam String transactionId,
-            @RequestParam String amount,
-            @RequestParam String currency,
             @AuthenticationPrincipal User currentUser
     ) {
-        // 1. Validate Currency Payload
+        // 1. Only accept numeric Flutterwave transaction IDs (also prevents URI path injection)
+        if (transactionId == null || !transactionId.matches("\\d{1,20}")) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid transaction ID."));
+        }
+
+        // 2. Verify with Flutterwave — the response is the sole source of truth
+        FlutterwaveService.VerifiedPayment verified =
+                flutterwaveService.verifyTransaction(transactionId);
+        if (verified == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Payment verification failed."));
+        }
+
+        // 3. The verified payment must belong to the authenticated user
+        if (verified.customerEmail() == null
+                || !verified.customerEmail().equalsIgnoreCase(currentUser.getEmail())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Payment does not belong to this account."));
+        }
+
+        // 4. Parse the gateway-reported currency (never the client's)
         Currency targetCurrency;
         try {
-            targetCurrency = Currency.valueOf(currency.toUpperCase().trim());
+            targetCurrency = Currency.valueOf(verified.currency().toUpperCase().trim());
         } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Unsupported currency code: " + currency));
+            return ResponseEntity.badRequest().body(Map.of("error", "Unsupported currency code: " + verified.currency()));
         }
 
-        // 2. Verify with Flutterwave gateway
-        boolean isValid = flutterwaveService.verifyTransaction(transactionId, amount, currency);
-        if (!isValid) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Payment verification failed or amount mismatch."));
-        }
-
-        // 3. Deposit funds safely via the Double-Entry Engine
-        // Passing the FLW transaction ID ensures it is recorded as the gateway_reference in the database
+        // 5. Deposit the gateway-reported amount via the Double-Entry Engine,
+        //    keyed by the FLW transaction ID for idempotency
         walletService.addFunds(
                 currentUser.getId(),
                 targetCurrency,
-                new BigDecimal(amount),
+                verified.amount(),
                 "FLW-" + transactionId
         );
 
