@@ -66,7 +66,17 @@ public class TransactionService {
         // 2. Fraud / KYC hard validation
         fraudDetectionService.validateUserStatusAndKyc(currentUser, request.amount(), request.sourceCurrency());
 
-        // 3. Pessimistic lock on source wallet before any balance read
+        // 3. Quote FX BEFORE taking any pessimistic locks — a cache miss performs an
+        //    external HTTP call, which must never run while holding wallet row locks
+        BigDecimal usdToSourceRate = fxRateService.getLiveQuote("USD", request.sourceCurrency().name()).exchangeRate();
+        BigDecimal sourceToDestRate = fxRateService.getLiveQuote(request.sourceCurrency().name(), request.destinationCurrency().name()).exchangeRate();
+
+        QuoteResult quote = feeEngine.calculateTransaction(
+                request.amount(), request.sourceCurrency().name(), request.destinationCurrency().name(),
+                usdToSourceRate, sourceToDestRate
+        );
+
+        // 4. Pessimistic lock on source wallet before any balance read
         Wallet sourceWallet = walletRepository.findByIdWithLock(request.sourceWalletId())
                 .orElseThrow(() -> new IllegalArgumentException("Source wallet not found"));
 
@@ -76,15 +86,6 @@ public class TransactionService {
 
         Beneficiary beneficiary = beneficiaryRepository.findById(request.beneficiaryId())
                 .orElseThrow(() -> new IllegalArgumentException("Beneficiary not found"));
-
-        // 4. Live FX rates → QuoteResult
-        BigDecimal usdToSourceRate = fxRateService.getLiveQuote("USD", request.sourceCurrency().name()).exchangeRate();
-        BigDecimal sourceToDestRate = fxRateService.getLiveQuote(request.sourceCurrency().name(), request.destinationCurrency().name()).exchangeRate();
-
-        QuoteResult quote = feeEngine.calculateTransaction(
-                request.amount(), request.sourceCurrency().name(), request.destinationCurrency().name(),
-                usdToSourceRate, sourceToDestRate
-        );
 
         // 5. Available balance check under the lock — prefer ledger, fall back to wallet cache
         BigDecimal availableBalance = getAvailableBalance(sourceWallet);
@@ -164,7 +165,17 @@ public class TransactionService {
         // 2. Fraud / KYC hard validation
         fraudDetectionService.validateUserStatusAndKyc(currentUser, request.amount(), request.sourceCurrency());
 
-        // 3. Pessimistic lock on source wallet
+        // 3. Quote FX BEFORE taking any pessimistic locks — external HTTP must
+        //    never run while holding wallet row locks
+        BigDecimal usdToSourceRate = fxRateService.getLiveQuote("USD", request.sourceCurrency().name()).exchangeRate();
+        BigDecimal sourceToDestRate = fxRateService.getLiveQuote(request.sourceCurrency().name(), request.destinationCurrency().name()).exchangeRate();
+
+        QuoteResult quote = feeEngine.calculateTransaction(
+                request.amount(), request.sourceCurrency().name(), request.destinationCurrency().name(),
+                usdToSourceRate, sourceToDestRate
+        );
+
+        // 4. Pessimistic lock on source wallet
         Wallet sourceWallet = walletRepository.findByIdWithLock(request.sourceWalletId())
                 .orElseThrow(() -> new IllegalArgumentException("Source wallet not found"));
 
@@ -182,15 +193,6 @@ public class TransactionService {
             destinationWallet = walletRepository.findByIdWithLock(request.destinationWalletId())
                     .orElseThrow(() -> new IllegalArgumentException("Recipient wallet not found"));
         }
-
-        // 4. Live FX rates → QuoteResult
-        BigDecimal usdToSourceRate = fxRateService.getLiveQuote("USD", request.sourceCurrency().name()).exchangeRate();
-        BigDecimal sourceToDestRate = fxRateService.getLiveQuote(request.sourceCurrency().name(), request.destinationCurrency().name()).exchangeRate();
-
-        QuoteResult quote = feeEngine.calculateTransaction(
-                request.amount(), request.sourceCurrency().name(), request.destinationCurrency().name(),
-                usdToSourceRate, sourceToDestRate
-        );
 
         // 5. Available balance check under the lock — prefer ledger, fall back to wallet cache
         BigDecimal availableBalance = getAvailableBalance(sourceWallet);

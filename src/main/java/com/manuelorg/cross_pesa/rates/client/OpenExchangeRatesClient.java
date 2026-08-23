@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 import java.util.Arrays;
 import java.util.stream.Collectors;
@@ -23,8 +24,15 @@ public class OpenExchangeRatesClient {
             @Value("${cross-pesa.fx.oer.app-id}") String appId,
             @Value("${cross-pesa.fx.oer.base-url:https://openexchangerates.org/api}") String baseUrl) {
 
+        // Tight timeouts: FX calls happen on the hot remittance path and must
+        // never stall request threads for long.
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(3000);
+        factory.setReadTimeout(5000);
+
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
+                .requestFactory(factory)
                 .build();
         this.appId = appId;
         this.supportedSymbols = Arrays.stream(Currency.values())
