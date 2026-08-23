@@ -1,6 +1,7 @@
 package com.manuelorg.cross_pesa.kycSubmission;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
+import com.manuelorg.cross_pesa.config.WebhookSecurityService;
 import com.manuelorg.cross_pesa.kycSubmission.controller.KycController;
 import com.manuelorg.cross_pesa.kycSubmission.dto.KycActionRequest;
 import com.manuelorg.cross_pesa.kycSubmission.dto.KycResponse;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,6 +40,9 @@ class KycControllerTest {
 
     @Mock
     private SmileIdService smileIdService;
+
+    @Mock
+    private WebhookSecurityService webhookSecurityService;
 
     @InjectMocks
     private KycController kycController;
@@ -138,10 +143,22 @@ class KycControllerTest {
     }
 
     @Test
+    void handleSmileIdWebhook_RejectsInvalidToken() {
+        Map<String, Object> payload = Map.of("JobID", "job-123");
+        when(webhookSecurityService.isValidSmileIdToken("bad-token")).thenReturn(false);
+
+        ResponseEntity<String> response = kycController.handleSmileIdWebhook("bad-token", payload);
+
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        verify(smileIdService, never()).processWebhook(any());
+    }
+
+    @Test
     void handleSmileIdWebhook_ProcessesWebhookAndReturns200() {
         Map<String, Object> payload = Map.of("JobID", "job-123");
+        when(webhookSecurityService.isValidSmileIdToken("valid-token")).thenReturn(true);
 
-        ResponseEntity<String> response = kycController.handleSmileIdWebhook(payload);
+        ResponseEntity<String> response = kycController.handleSmileIdWebhook("valid-token", payload);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertEquals("Webhook received and processed", response.getBody());

@@ -113,6 +113,13 @@ flutterwave:
   redirect-url: http://localhost:5173/wallet/verify-topup
   webhook-secret: ${FLW_WEBHOOK_SECRET}
 
+# Inbound webhook secrets. If unset, the corresponding webhooks reject all traffic.
+webhook:
+  payout-secret: ${PAYOUT_WEBHOOK_SECRET:}
+
+smile-id:
+  callback-token: ${SMILE_ID_CALLBACK_TOKEN:}
+
 
 #redis
 app:

@@ -1,6 +1,7 @@
 package com.manuelorg.cross_pesa.kycSubmission.controller;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
+import com.manuelorg.cross_pesa.config.WebhookSecurityService;
 import com.manuelorg.cross_pesa.kycSubmission.dto.KycActionRequest;
 import com.manuelorg.cross_pesa.kycSubmission.dto.KycResponse;
 import com.manuelorg.cross_pesa.kycSubmission.dto.KycSubmissionRequest;
@@ -27,6 +28,7 @@ public class KycController {
 
     private final KycService kycService;
     private final SmileIdService smileIdService;
+    private final WebhookSecurityService webhookSecurityService;
 
     // --- USER ENDPOINTS ---
 
@@ -71,9 +73,16 @@ public class KycController {
     /**
      * PUBLIC ENDPOINT: Smile ID Webhook Listener
      * Smile ID servers hit this URL asynchronously after processing the images.
+     * Requests must carry the shared secret in the {@code X-Callback-Token} header.
      */
     @PostMapping("/webhook/smile-id")
-    public ResponseEntity<String> handleSmileIdWebhook(@RequestBody Map<String, Object> payload) {
+    public ResponseEntity<String> handleSmileIdWebhook(
+            @RequestHeader(value = "X-Callback-Token", required = false) String callbackToken,
+            @RequestBody Map<String, Object> payload) {
+
+        if (!webhookSecurityService.isValidSmileIdToken(callbackToken)) {
+            return ResponseEntity.status(401).body("Invalid callback token");
+        }
 
         // Pass the raw JSON map straight to our dedicated service
         smileIdService.processWebhook(payload);
