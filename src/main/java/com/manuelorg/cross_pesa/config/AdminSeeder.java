@@ -9,6 +9,7 @@ import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -23,11 +24,15 @@ public class AdminSeeder implements CommandLineRunner {
     private final PasswordEncoder passwordEncoder;
     private final WalletService walletService;
 
+    @Value("${app.admin.email}")
+    private String adminEmail;
+
+    @Value("${app.admin.password}")
+    private String adminPassword;
+
     @Override
     @Transactional
     public void run(String... args) {
-        String adminEmail = "admin@crosspesa.com";
-
         if (!userRepository.existsByEmail(adminEmail)) {
             log.info("🚀 Seeding initial System Admin: {}", adminEmail);
 
@@ -36,7 +41,7 @@ public class AdminSeeder implements CommandLineRunner {
                     .lastName("Admin")
                     .email(adminEmail)
                     .phoneNumber("+254700000000")
-                    .password(passwordEncoder.encode("Admin123!"))
+                    .password(passwordEncoder.encode(adminPassword))
                     .role(Role.ADMIN)
                     .authProvider(AuthProvider.LOCAL)
                     .kycStatus(KycStatus.APPROVED)

@@ -1,6 +1,7 @@
 package com.manuelorg.cross_pesa.ledger.service;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
+import com.manuelorg.cross_pesa.exception.InsufficientFundsException;
 import com.manuelorg.cross_pesa.ledger.dto.LedgerEntryResponse;
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
 import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
@@ -69,7 +70,7 @@ public class LedgerService {
 
         // 3. Enforce retail insufficient funds check
         if (lockedSource.getWalletType() == WalletType.USER_RETAIL && sourceCurrentBalance.compareTo(amount) < 0) {
-            throw new IllegalStateException(String.format(
+            throw new InsufficientFundsException(String.format(
                     "Insufficient funds in wallet %s. Available: %s, Attempted Debit: %s",
                     lockedSource.getId(), sourceCurrentBalance, amount));
         }

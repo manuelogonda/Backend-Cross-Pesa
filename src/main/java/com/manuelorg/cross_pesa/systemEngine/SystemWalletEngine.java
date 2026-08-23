@@ -188,8 +188,11 @@ public class SystemWalletEngine {
             routingWallet.setBalance(routingNewBalance);
         }
 
-        // --- 6. FX CLEARING POOLS (Source receives principal net of routing; Target disburses payout) ---
-        BigDecimal totalSourceClearingAmount = principal.subtract(routingFee);
+        // --- 6. FX CLEARING POOLS (Source receives full principal; Target disburses payout) ---
+        // The user was separately debited markup + routing fees, which are credited
+        // to their own system wallets. Crediting principal minus routing here would
+        // leave the source-currency books unbalanced by the routing fee.
+        BigDecimal totalSourceClearingAmount = principal;
         BigDecimal sourceLiqNewBalance = sourceLiqCurrentBalance.add(totalSourceClearingAmount);
         entries.add(buildLeg(transaction, sourceLiquidityWallet, EntryClass.FX_CLEARING,
                 BigDecimal.ZERO, totalSourceClearingAmount, sourceCurrency,

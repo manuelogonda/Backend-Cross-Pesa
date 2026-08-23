@@ -278,9 +278,12 @@ public class TransactionService {
         }
 
         // --- FX CLEARING ---
-        srcLiqRunning = srcLiqRunning.add(quote.amountAfterFees());
+        // The clearing pool receives the FULL principal: the user was separately
+        // debited the markup + routing fees, which are credited to their own
+        // system wallets. Crediting net here would leave the ledger unbalanced.
+        srcLiqRunning = srcLiqRunning.add(quote.amountSent());
         entries.add(buildEntry(tx, systemLiquiditySource, EntryClass.FX_CLEARING,
-                BigDecimal.ZERO, quote.amountAfterFees(), quote, "P2P Inbound Clearing", srcLiqRunning));
+                BigDecimal.ZERO, quote.amountSent(), quote, "P2P Inbound Clearing", srcLiqRunning));
 
         destLiqRunning = destLiqRunning.subtract(quote.payoutAmountTarget());
         entries.add(buildEntry(tx, systemLiquidityDest, EntryClass.FX_CLEARING,

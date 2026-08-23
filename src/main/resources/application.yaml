@@ -52,6 +52,15 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
+  # 5. Flyway Database Migrations
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Existing dev DBs were created by Hibernate ddl-auto; baseline them at V1
+    # so V2+ migrations apply cleanly.
+    baseline-on-migrate: true
+    baseline-version: 1
+
   web:
     error:
       include-message: always
@@ -83,10 +92,6 @@ application:
       access-token-expiration: ${JWT_EXPIRATION}
       refresh-token-expiration: ${JWT_REFRESH_EXPIRATION}
 
-#flyway:
-#  enabled: false
-#  baseline-on-migrate: false
-#  locations: classpath:db/migration
 cross-pesa:
   fx:
     oer:
@@ -114,6 +119,9 @@ app:
   redis:
     password: ${REDIS_PASSWORD}
     address: ${REDIS_ADDRESS}
+  admin:
+    email: ${ADMIN_EMAIL:admin@crosspesa.com}
+    password: ${ADMIN_PASSWORD}
 
 cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME}
