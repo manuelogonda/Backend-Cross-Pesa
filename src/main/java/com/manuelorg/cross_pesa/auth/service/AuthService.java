@@ -9,6 +9,7 @@ import com.manuelorg.cross_pesa.auth.entity.Role;
 import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.auth.repository.UserRepository;
 import com.manuelorg.cross_pesa.config.JwtService;
+import org.springframework.transaction.annotation.Transactional;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
@@ -25,9 +26,11 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final WalletService walletService;
     private final org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
 
 
+    @Transactional
     public AuthResponse register(RegisterRequest request) {
         // RECORD syntax: request.email()
         if (repository.existsByEmail(request.email())) {
@@ -50,15 +53,10 @@ public class AuthService {
 
         User savedUser = repository.save(user);
 
-        var accessToken = jwtService.generateAccessToken(savedUser);
-        var refreshToken = jwtService.generateRefreshToken(savedUser);
+        // Provision the requested default-currency retail wallet (defaults to KES).
+        walletService.createWallet(savedUser, request.currency() != null ? request.currency() : Currency.KES);
 
-        return AuthResponse.builder()
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .role(user.getRole().name())
-                .firstName(user.getFirstName()) // CLASS syntax: user.getFirstName()
-                .build();
+        return buildAuthResponse(savedUser);
     }
 
     public AuthResponse login(LoginRequest request) {

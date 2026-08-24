@@ -175,23 +175,23 @@ public class TransactionService {
                 usdToSourceRate, sourceToDestRate
         );
 
-        // 4. Pessimistic lock on source wallet
-        Wallet sourceWallet = walletRepository.findByIdWithLock(request.sourceWalletId())
-                .orElseThrow(() -> new IllegalArgumentException("Source wallet not found"));
+        // 4. Lock both wallets in deterministic UUID order to prevent deadlocks
+        // between concurrent opposite-direction transfers (A→B vs B→A).
+        UUID firstId = request.sourceWalletId().compareTo(request.destinationWalletId()) < 0
+                ? request.sourceWalletId() : request.destinationWalletId();
+        UUID secondId = firstId.equals(request.sourceWalletId())
+                ? request.destinationWalletId() : request.sourceWalletId();
+
+        Wallet lockedFirst = walletRepository.findByIdWithLock(firstId)
+                .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
+        Wallet lockedSecond = walletRepository.findByIdWithLock(secondId)
+                .orElseThrow(() -> new IllegalArgumentException("Recipient wallet not found"));
+
+        Wallet sourceWallet = lockedFirst.getId().equals(request.sourceWalletId()) ? lockedFirst : lockedSecond;
+        Wallet destinationWallet = firstId.equals(request.sourceWalletId()) ? lockedSecond : lockedFirst;
 
         if (!sourceWallet.getUser().getId().equals(currentUser.getId())) {
             throw new SecurityException("You do not own the source wallet.");
-        }
-
-        // Lock destination wallet too — deterministic UUID order to prevent deadlocks
-        Wallet destinationWallet;
-        if (request.sourceWalletId().compareTo(request.destinationWalletId()) < 0) {
-            destinationWallet = walletRepository.findByIdWithLock(request.destinationWalletId())
-                    .orElseThrow(() -> new IllegalArgumentException("Recipient wallet not found"));
-        } else {
-            // Source was locked first above; re-lock dest (already locked source)
-            destinationWallet = walletRepository.findByIdWithLock(request.destinationWalletId())
-                    .orElseThrow(() -> new IllegalArgumentException("Recipient wallet not found"));
         }
 
         // 5. Available balance check under the lock — prefer ledger, fall back to wallet cache

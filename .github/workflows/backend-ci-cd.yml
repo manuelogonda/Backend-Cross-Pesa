@@ -20,16 +20,18 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Setup Gradle with caching
-        uses: gradle/actions/setup-gradle@v4
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging' }}
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-
 
-      - name: Grant execute permission to Gradle wrapper
-        run: chmod +x gradlew
+      - name: Grant execute permission to Maven wrapper
+        run: chmod +x mvnw
 
       - name: Run unit and integration tests
-        run: ./gradlew test
+        run: ./mvnw test
 
   deploy:
     name: Automated Deployment
