@@ -1,6 +1,6 @@
 # CrossPesa Roadmap
 
-> This roadmap outlines the planned evolution of CrossPesa from a functional MVP into a production-inspired cross-border financial platform.
+> This roadmap outlines the evolution of CrossPesa from a functional MVP into a production-inspired cross-border financial platform.
 
 ---
 
@@ -38,120 +38,108 @@ Production-Grade FinTech
 
 ## Authentication
 
-* User Registration
-* User Login
-* JWT Authentication
-* BCrypt Password Hashing
-* Role-based Authorization
+* User Registration ✅ (with password strength policy + default-currency wallet provisioning)
+* User Login ✅ (Redis-backed per-IP rate limiting)
+* JWT Authentication ✅ (access + refresh tokens, token-type claims)
+* BCrypt Password Hashing ✅
+* Role-based Authorization ✅
+* Google OAuth2 login ✅ (configurable redirect, fragment-based token delivery)
 
 ## Wallets
 
-* Multi-currency wallets
-* Wallet balances
-* Wallet status
+* Multi-currency wallets ✅
+* Wallet balances ✅
+* Wallet status ✅
 
 ## Transfers
 
-* Wallet funding (mock)
-* Cross-border transfers
-* Currency conversion
-* Transaction history
+* Wallet funding ✅ (verified Flutterwave checkout — no longer mock)
+* Cross-border transfers ✅
+* Currency conversion ✅
+* Transaction history ✅
 
 ## Exchange Rates
 
-* External FX API integration
-* Cached exchange rates
+* External FX API integration ✅ (Open Exchange Rates, with HTTP timeouts)
+* Cached exchange rates ✅ (Postgres-backed)
 
 ## Notifications
 
-* Database notifications
-* In-app notification support
+* Database notifications ✅
+* In-app notification support ✅
 
 ## Database
 
-* PostgreSQL
-* Flyway migrations
+* PostgreSQL ✅
+* Flyway migrations ✅ (V1–V5)
 
 Status:
 
-**Current Development**
+**Complete**
 
 ---
 
-# Version 1.1 — Financial Foundation
+# Version 1.1 — Financial Foundation ✅
 
-Introduce proper financial accounting.
+Proper financial accounting.
 
-## Double Entry Ledger
+## Double Entry Ledger ✅
 
-* Ledger entries
-* Debit/Credit accounting
-* Immutable transaction records
+* Ledger entries with running `balance_after` per leg
+* Debit/Credit accounting enforced at DB level (`chk_debit_credit_exclusive`)
+* Immutable transaction records (legs are non-updatable)
+* Monotonic `entry_seq` ordering for correct balance derivation (Flyway V4)
+* System wallet grid: SYSTEM_MARKUP / SYSTEM_ROUTING / SYSTEM_LIQUIDITY per currency
 
-## Wallet Improvements
+## Wallet Improvements ✅
 
-* Wallet balance derived from ledger
-* Balance validation
-* Account reconciliation
+* Wallet balance derived from ledger (wallet row is only a projection)
+* Balance validation under pessimistic locks
+* Unified available-balance semantics (ledger balance − locked funds, clamped)
 
-## Transaction Improvements
+## Transaction Improvements ✅
 
-* Transaction references
-* Improved audit trail
+* Gateway/payout references with partial unique indexes
+* FX audit trail (USD normalization rate, applied rate, routing pair, markup tiers)
 
 Status:
 
-**Planned**
+**Complete**
 
 ---
 
-# Version 1.2 — Reliable Money Transfers
+# Version 1.2 — Reliable Money Transfers ✅
 
-Improve transaction safety.
+Transaction safety.
 
-## Transfer State Machine
-
-```
-PENDING
-↓
-PROCESSING
-↓
-COMPLETED
-
-or
-
-FAILED
-```
-
-Future expansion:
+## Transfer State Machine ✅
 
 ```
-PENDING
+PENDING / PROCESSING / FLAGGED
 ↓
-SCREENING
-↓
-FX_LOCKED
-↓
-DEBITED
-↓
-PARTNER_PENDING
-↓
-COMPLETED
+COMPLETED or FAILED (+ automatic ledger reversal & refund on failure/timeout)
 ```
 
-## Idempotency
+* Settlement worker confirms payouts via provider status; never fabricates completion
+* Failed/unconfirmed payouts are fully reversed (user refund, fee clawback, float restoration) idempotently
 
-* Prevent duplicate transfers
-* Safe retries
+## Idempotency ✅
+
+* DB-unique-index-enforced idempotency keys; concurrent duplicates get clean HTTP 409s
+* Safe retries across send-money and P2P flows
+
+## Webhook Trust Model ✅
+
+* HMAC-SHA256 signature validation (payout callbacks), shared-secret validation (Flutterwave, Smile ID)
+* Fail-safe defaults: unconfigured secrets reject all traffic
 
 ## Exchange Rate Locking
 
-* Quote expiration
-* FX validity window
+* Quote expiration / FX validity window — **partially in place** (fx_rates expiry window exists); quote-lock-per-transfer still planned
 
 Status:
 
-**Planned**
+**Complete** (FX quote locking partially remaining)
 
 ---
 
@@ -214,7 +202,7 @@ Features:
 
 Status:
 
-**Planned**
+**Planned** (admin dashboard metrics already provide aggregate revenue/status views)
 
 ---
 
@@ -234,7 +222,7 @@ Publish domain events:
 
 Consumers:
 
-* Notifications
+* Notifications *(currently served by Spring application events + scheduled poller)*
 * Analytics
 * Audit
 * Fraud Detection
@@ -274,37 +262,39 @@ Examples:
 
 Compensation:
 
-* Automatic rollback
-* Refund handling
-* Failure recovery
+* Automatic rollback ✅ (single-transaction atomicity today; payout reversal logic already implements business-level compensation)
+* Refund handling ✅ (mirrored reversal legs in the settlement engine)
+* Failure recovery ✅ (timeout-driven reversal in the settlement worker)
+
+Remaining: distribute these steps across services, where the saga pattern becomes necessary.
 
 Status:
 
-**Future**
+**Partially realized** (compensation semantics exist; distributed orchestration future)
 
 ---
 
 # Version 2.3 — Fraud & Compliance
 
-Introduce financial risk controls.
+Financial risk controls.
 
-## Compliance
+## Compliance ✅ (core)
 
-* KYC verification
-* AML screening
-* Transaction limits
-* Country restrictions
+* KYC verification ✅ (Smile ID pipeline: submission, webhook auto-decision, admin review)
+* Transaction limits ✅ (tiered KYC levels enforced against daily aggregates, KES-normalized)
+* Country restrictions ✅ (DB CHECK constraint on country of residence)
+* AML screening — **planned**
 
-## Fraud Detection
+## Fraud Detection ✅ (core)
 
-* Velocity checks
-* Suspicious transaction monitoring
-* Device fingerprinting
-* Login anomaly detection
+* Velocity checks ✅ (>5 transactions/hour flags)
+* Suspicious transaction monitoring ✅ (high-value flagging → FLAGGED status)
+* Device fingerprinting — **planned**
+* Login anomaly detection — **planned** (rate limiting exists as first layer)
 
 Status:
 
-**Future**
+**Core complete** (AML screening, device fingerprinting, login anomaly detection remaining)
 
 ---
 
@@ -312,23 +302,28 @@ Status:
 
 Connect to external payment providers.
 
-Potential integrations:
+Current integrations:
 
-* M-Pesa
+* Flutterwave ✅ (funding + webhooks)
+* M-Pesa / Africa's Talking ✅ (SMS notifications; payouts pending)
+* Open Exchange Rates ✅ (FX)
+* Smile ID ✅ (KYC)
+
+Planned integrations:
+
 * Airtel Money
-* Bank APIs
+* Bank APIs (real payout transfer-status verification is the immediate next step)
 * Card processors
-* FX providers
 
 Features:
 
-* Partner callbacks
-* Reconciliation
-* Settlement reports
+* Partner callbacks ✅ (signed webhook infrastructure)
+* Reconciliation — **planned**
+* Settlement reports — **planned**
 
 Status:
 
-**Future**
+**In Progress**
 
 ---
 
@@ -336,24 +331,29 @@ Status:
 
 Transform CrossPesa into a production-inspired financial platform.
 
+Completed:
+
+* Modular monolith structure (package-by-feature)
+* Redis caching / rate limiting
+* Background workers (settlement worker, notification poller)
+* Docker Compose for local infra
+* Monitoring & metrics (Micrometer, structured JSON logging, trace-id propagation)
+* Health checks (Actuator, public health / admin-only operations)
+* Rate limiting
+* CI/CD pipeline (Maven quality gate + Render deploy hooks)
+* Automated testing (121 unit & integration tests)
+
 Planned improvements:
 
-* Modular Monolith refinement
 * API Gateway
-* Redis caching
-* Background workers
-* Docker Compose
-* Monitoring & Metrics
-* Centralized logging
-* Health checks
-* Rate limiting
-* API versioning
-* CI/CD pipeline
-* Automated testing
+* Centralized log aggregation
+* API versioning strategy
+* Kubernetes deployment
+* High availability architecture
 
 Status:
 
-**Vision**
+**Mostly complete** (gateway, centralized logging, k8s remaining)
 
 ---
 
@@ -374,28 +374,29 @@ Status:
 
 # Engineering Concepts Covered
 
-Throughout this roadmap, CrossPesa is expected to demonstrate knowledge of:
+Demonstrated so far:
 
-* Java & Spring Boot
-* Spring Security
-* JWT Authentication
-* PostgreSQL
-* Flyway
-* JPA/Hibernate
-* REST APIs
-* External API integration
-* Financial transaction processing
-* Double-entry accounting
-* Event-Driven Architecture
-* Apache Kafka
-* Transactional Outbox Pattern
-* Saga Pattern
-* Redis
-* Docker
-* Git & GitHub Flow
-* CI/CD
+* Java 21 & Spring Boot 4
+* Spring Security (JWT + OAuth2, token-type claims, refresh flow)
+* PostgreSQL with integrity-first modeling (CHECK constraints, partial unique indexes, triggers)
+* Flyway versioned migrations with backfills
+* JPA/Hibernate (pessimistic locking, JSONB, generated values)
+* REST API design
+* Double-entry accounting with ledger-derived balances
+* Concurrency control: deterministic lock ordering, idempotency keys, TOCTOU elimination
+* Webhook security (HMAC signatures, constant-time comparison, fail-safe defaults)
+* External API integration (Flutterwave, OER, Smile ID, Africa's Talking, Cloudinary, SendGrid)
+* Scheduled workers and async processing (proxy-safe @Async)
+* Observability (MDC tracing, Micrometer, structured logs)
+* Docker, Git/GitHub Flow, CI/CD
 * Secure software engineering
-* Scalable backend architecture
+
+Still ahead:
+
+* Event-Driven Architecture (Kafka)
+* Transactional Outbox Pattern
+* Saga orchestration across services
+* Scalable distributed backend architecture
 
 ---
 
