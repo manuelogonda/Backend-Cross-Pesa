@@ -80,7 +80,7 @@ EXECUTE FUNCTION update_modified_column()^^
 
 
 -- 2. The Beneficiaries Table
-CREATE TABLE beneficiaries
+CREATE TABLE IF NOT EXISTS beneficiaries
 (
     id               UUID PRIMARY KEY             DEFAULT gen_random_uuid(),
 
@@ -361,7 +361,7 @@ CREATE TABLE IF NOT EXISTS fx_rates
     CONSTRAINT chk_different_currencies CHECK (source_currency <> destination_currency),
     CONSTRAINT chk_valid_expiry_window CHECK (expires_at > valid_from)
 );
-CREATE TRIGGER update_transactions_modtime
+CREATE TRIGGER update_fx_rates_modtime
     BEFORE UPDATE
     ON fx_rates
     FOR EACH ROW
@@ -403,14 +403,14 @@ CREATE TABLE IF NOT EXISTS notifications
 
     updated_at        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 )^^
-CREATE TRIGGER update_transactions_modtime
+CREATE TRIGGER update_notifications_modtime
     BEFORE UPDATE
     ON notifications
     FOR EACH ROW
 EXECUTE FUNCTION update_modified_column()^^
 
 -- 8 kyc submission
-CREATE TABLE kyc_submissions (
+CREATE TABLE IF NOT EXISTS kyc_submissions (
                                  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                                  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 
@@ -438,7 +438,7 @@ CREATE TABLE kyc_submissions (
                                  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                                  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TRIGGER update_transactions_modtime
+CREATE TRIGGER update_kyc_submissions_modtime
     BEFORE UPDATE
     ON kyc_submissions
     FOR EACH ROW

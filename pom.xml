@@ -11,21 +11,8 @@
 	<groupId>com.manuelorg</groupId>
 	<artifactId>cross-pesa</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name/>
-	<description/>
-	<url/>
-	<licenses>
-		<license/>
-	</licenses>
-	<developers>
-		<developer/>
-	</developers>
-	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
-	</scm>
+	<name>CrossPesa</name>
+	<description>Cross-border remittance and wallet platform</description>
 	<properties>
 		<java.version>21</java.version>
 		<maven.compiler.source>21</maven.compiler.source>
@@ -54,8 +41,8 @@
 		</dependency>
 		<dependency>
 			<groupId>com.cloudinary</groupId>
-			<artifactId>cloudinary-http44</artifactId>
-			<version>1.36.0</version>
+			<artifactId>cloudinary-http5</artifactId>
+			<version>2.4.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.redisson</groupId>
