@@ -51,7 +51,8 @@ public class FraudDetectionService {
             amountInKes = amount.multiply(rateResponse.exchangeRate());
         }
 
-        // 4. Enforce Tiered KYC Limits
+        // 4. Enforce Tiered KYC Limits — against the DAILY AGGREGATE, not just
+        //    this single transaction (a tier-1 user could otherwise send 50x 49k)
         BigDecimal dailyLimit = switch (user.getKycLevel()) {
             case 1 -> new BigDecimal("50000.00");   // Basic ID - 50k KES limit
             case 2 -> new BigDecimal("500000.00");  // Verified Address - 500k KES limit
@@ -59,9 +60,15 @@ public class FraudDetectionService {
             default -> BigDecimal.ZERO;
         };
 
-        if (amountInKes.compareTo(dailyLimit) > 0) {
-            log.warn("KYC Limit Exceeded: User {} (Tier {}) attempted {} KES transfer.", user.getId(), user.getKycLevel(), amountInKes);
-            throw new IllegalStateException("Amount exceeds your Tier " + user.getKycLevel() + " limit of " + dailyLimit + " KES.");
+        OffsetDateTime startOfDay = OffsetDateTime.now().toLocalDate().atStartOfDay().atOffset(OffsetDateTime.now().getOffset());
+        BigDecimal sentToday = transactionRepository.sumSentSince(user.getId(), startOfDay);
+        BigDecimal dailyTotal = sentToday.add(amountInKes);
+
+        if (dailyTotal.compareTo(dailyLimit) > 0) {
+            log.warn("KYC Daily Limit Exceeded: User {} (Tier {}) attempted transfer pushing daily total to {} KES.",
+                    user.getId(), user.getKycLevel(), dailyTotal);
+            throw new IllegalStateException("This transfer would exceed your Tier " + user.getKycLevel()
+                    + " daily limit of " + dailyLimit + " KES.");
         }
     }
 

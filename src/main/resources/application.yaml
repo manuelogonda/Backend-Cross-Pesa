@@ -83,7 +83,9 @@ management:
       show-details: when-authorized
   httpexchanges:
     recording:
-      include: request-headers,response-headers,principal,remote-address,session-id,time-taken
+      # Privacy: do NOT record principal/remote-address/session-id —
+      # they store PII and session identifiers in memory on every request.
+      include: time-taken
 
 # 5. Custom App Security Configuration (Top-level root block)
 application:

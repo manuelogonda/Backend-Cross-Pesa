@@ -37,6 +37,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
     @Query("SELECT COUNT(t) FROM Transaction t WHERE t.sender.id = :userId AND t.createdAt >= :since")
     long countRecentTransactionsByUser(@Param("userId") UUID userId, @Param("since") OffsetDateTime since);
 
+    /**
+     * Sum of everything a user has sent since the given instant (source currency
+     * amounts are NOT converted here — caller aggregates in base currency terms).
+     */
+    @Query("SELECT COALESCE(SUM(t.grossAmount), 0) FROM Transaction t WHERE t.sender.id = :userId AND t.createdAt >= :since")
+    BigDecimal sumSentSince(@Param("userId") UUID userId, @Param("since") OffsetDateTime since);
+
     // --- USER-FACING STATEMENTS ---
 
     Page<Transaction> findBySenderId(UUID senderId, Pageable pageable);

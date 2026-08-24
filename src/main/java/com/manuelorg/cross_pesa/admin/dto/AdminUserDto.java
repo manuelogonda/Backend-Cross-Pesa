@@ -21,7 +21,7 @@ public class AdminUserDto {
             String email,
             String phoneNumber,
             String idType,
-            String idNumber,
+            String idNumberMasked,
             UserStatus status,
             KycStatus kycStatus,
             Integer kycLevel,
@@ -35,12 +35,23 @@ public class AdminUserDto {
                     user.getEmail(),
                     user.getPhoneNumber(),
                     user.getIdType(),
-                    user.getIdNumber(),
+                    maskIdNumber(user.getIdNumber()),
                     user.getStatus(),
                     user.getKycStatus(),
                     user.getKycLevel(),
                     user.getCreatedAt()
             );
+        }
+
+        /**
+         * List views must not expose full government ID numbers.
+         * Keeps only the last 3 characters for reference matching.
+         */
+        private static String maskIdNumber(String idNumber) {
+            if (idNumber == null || idNumber.length() <= 3) {
+                return "***";
+            }
+            return "*".repeat(idNumber.length() - 3) + idNumber.substring(idNumber.length() - 3);
         }
     }
 
