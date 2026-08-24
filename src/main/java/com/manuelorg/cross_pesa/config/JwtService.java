@@ -44,11 +44,20 @@ public class JwtService {
             extraClaims.put("role", "ROLE_" + customUser.getRole().name());
             extraClaims.put("userId", customUser.getId().toString());
         }
+        extraClaims.put("token_type", "access");
         return buildToken(extraClaims, userDetails, jwtExpiration);
     }
 
     public String generateRefreshToken(UserDetails userDetails) {
-        return buildToken(new HashMap<>(), userDetails, refreshExpiration);
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("token_type", "refresh");
+        return buildToken(claims, userDetails, refreshExpiration);
+    }
+
+    /** Distinguishes access tokens from refresh tokens so a refresh token
+     *  can never be replayed as an access credential (and vice versa). */
+    public String extractTokenType(String token) {
+        return extractClaim(token, claims -> claims.get("token_type", String.class));
     }
 
     private String buildToken(Map<String, Object> extraClaims, UserDetails userDetails, long expiration) {

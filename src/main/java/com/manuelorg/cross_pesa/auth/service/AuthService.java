@@ -25,6 +25,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
 
 
     public AuthResponse register(RegisterRequest request) {
@@ -72,6 +73,42 @@ public class AuthService {
         var user = repository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
+        return buildAuthResponse(user);
+    }
+
+    /**
+     * Exchanges a valid refresh token for a fresh token pair.
+     * The user is re-loaded from the database so suspended/locked/demoted
+     * accounts cannot mint new tokens.
+     */
+    public AuthResponse refresh(String refreshToken) {
+        String email;
+        try {
+            email = jwtService.extractUsername(refreshToken);
+        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException e) {
+            throw new org.springframework.security.authentication.BadCredentialsException("Invalid refresh token");
+        }
+
+        if (!"refresh".equals(jwtService.extractTokenType(refreshToken))) {
+            throw new org.springframework.security.authentication.BadCredentialsException("Invalid refresh token");
+        }
+
+        var userDetails = userDetailsService.loadUserByUsername(email);
+        if (!jwtService.isTokenValid(refreshToken, userDetails)) {
+            throw new org.springframework.security.authentication.BadCredentialsException("Invalid or expired refresh token");
+        }
+
+        var user = repository.findByEmail(email)
+                .orElseThrow(() -> new org.springframework.security.authentication.BadCredentialsException("User no longer exists"));
+
+        if (user.getStatus() != null && user.getStatus() != com.manuelorg.cross_pesa.auth.entity.UserStatus.ACTIVE) {
+            throw new org.springframework.security.authentication.DisabledException("Account is not active");
+        }
+
+        return buildAuthResponse(user);
+    }
+
+    private AuthResponse buildAuthResponse(User user) {
         var accessToken = jwtService.generateAccessToken(user);
         var refreshToken = jwtService.generateRefreshToken(user);
 

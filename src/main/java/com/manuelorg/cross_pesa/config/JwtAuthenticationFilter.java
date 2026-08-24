@@ -34,9 +34,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         final String jwt;
         final String userEmail;
 
-        // Skip JWT validation for public authentication endpoints
+        // Skip JWT validation for public authentication endpoints.
+        // startsWith (never contains) — a substring match would let crafted
+        // paths slip past token processing.
         String path = request.getServletPath();
-        if (path.contains("/api/v1/auth/")) {
+        if (path.startsWith("/api/v1/auth/")) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -54,11 +56,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 3. If we have an email, and the user is NOT already authenticated in this session
         if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
 
-            // Load the user from the database
+            // Load the user from the database — authorities always reflect the
+            // current DB role, so a demoted/suspended user loses access immediately.
             UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
 
-            // 4. Validate the token mathematically
-            if (jwtService.isTokenValid(jwt, userDetails)) {
+            // 4. Validate the token mathematically AND make sure it is an access
+            //    token, never a refresh token being replayed as credentials
+            if (jwtService.isTokenValid(jwt, userDetails)
+                    && "access".equals(jwtService.extractTokenType(jwt))) {
 
                 // 5. Tell Spring Security: "This user is legitimate, let them in."
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(

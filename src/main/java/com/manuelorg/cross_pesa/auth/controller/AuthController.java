@@ -2,6 +2,7 @@ package com.manuelorg.cross_pesa.auth.controller;
 
 import com.manuelorg.cross_pesa.auth.dto.AuthResponse;
 import com.manuelorg.cross_pesa.auth.dto.LoginRequest;
+import com.manuelorg.cross_pesa.auth.dto.RefreshTokenRequest;
 import com.manuelorg.cross_pesa.auth.dto.RegisterRequest;
 import com.manuelorg.cross_pesa.auth.security.LoginRateLimiterService;
 import com.manuelorg.cross_pesa.auth.service.AuthService;
@@ -36,6 +37,21 @@ public class AuthController {
     ) {
         // We use HTTP 201 (CREATED) to explicitly tell the frontend a new resource was made
         return new ResponseEntity<>(service.register(request), HttpStatus.CREATED);
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refresh(
+            @Valid @RequestBody RefreshTokenRequest request
+    ) {
+        try {
+            return ResponseEntity.ok(service.refresh(request.refreshToken()));
+        } catch (DisabledException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Your account is currently suspended. Please contact support."));
+        } catch (BadCredentialsException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid or expired refresh token."));
+        }
     }
 
 
