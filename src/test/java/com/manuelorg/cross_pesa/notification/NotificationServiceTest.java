@@ -8,6 +8,7 @@ import com.manuelorg.cross_pesa.notification.entity.Notification;
 import com.manuelorg.cross_pesa.notification.enums.NotificationStatus;
 import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import com.manuelorg.cross_pesa.notification.repository.NotificationRepository;
+import com.manuelorg.cross_pesa.notification.service.NotificationDispatchService;
 import com.manuelorg.cross_pesa.notification.service.NotificationService;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
@@ -44,6 +45,9 @@ class NotificationServiceTest {
 
     @Mock
     private TransactionRepository transactionRepository;
+
+    @Mock
+    private NotificationDispatchService notificationDispatchService;
 
     @InjectMocks
     private NotificationService notificationService;
@@ -148,39 +152,29 @@ class NotificationServiceTest {
     }
 
     @Test
-    void recordDispatchFailure_UpdatesRetryCountAndErrorMessage() {
-        UUID notificationId = UUID.randomUUID();
-        Notification notification = Notification.builder()
-                .id(notificationId)
-                .retryCount(1)
-                .errorMessage(null)
-                .build();
+    void handleNotificationEvent_SmsType_TriggersAsyncDispatch() {
+        TriggerNotificationEvent event = new TriggerNotificationEvent(
+                userId,
+                transactionId,
+                "Transfer Successful",
+                "Your transfer of $100 succeeded",
+                NotificationType.SMS,
+                Map.of()
+        );
 
-        when(notificationRepository.findById(notificationId)).thenReturn(Optional.of(notification));
+        when(notificationRepository.findByIdempotencyKey(any(UUID.class))).thenReturn(Optional.empty());
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(transactionRepository.findById(transactionId)).thenReturn(Optional.of(transaction));
+        when(notificationRepository.save(any(Notification.class))).thenAnswer(invocation -> {
+            Notification n = invocation.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
 
-        notificationService.recordDispatchFailure(notificationId, "Connection timeout");
+        notificationService.handleNotificationEvent(event);
 
-        assertEquals(2, notification.getRetryCount());
-        assertEquals("Connection timeout", notification.getErrorMessage());
-        verify(notificationRepository).save(notification);
-    }
-
-    @Test
-    void recordDispatchFailure_NullInitialRetryCount_IncrementsToOne() {
-        UUID notificationId = UUID.randomUUID();
-        Notification notification = Notification.builder()
-                .id(notificationId)
-                .retryCount(null)
-                .errorMessage(null)
-                .build();
-
-        when(notificationRepository.findById(notificationId)).thenReturn(Optional.of(notification));
-
-        notificationService.recordDispatchFailure(notificationId, "Gateway error");
-
-        assertEquals(1, notification.getRetryCount());
-        assertEquals("Gateway error", notification.getErrorMessage());
-        verify(notificationRepository).save(notification);
+        // external dispatch must go through the dispatcher bean (so @Async applies)
+        verify(notificationDispatchService).dispatchExternal(any(UUID.class));
     }
 
     @Test

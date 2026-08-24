@@ -395,6 +395,9 @@ CREATE TABLE IF NOT EXISTS notifications
     status            VARCHAR(20)  NOT NULL    DEFAULT 'UNREAD'
         CHECK (status IN ('UNREAD', 'READ', 'ARCHIVED')),
 
+    -- Delivery lifecycle, independent of the user's read status
+    dispatched_at     TIMESTAMPTZ,
+
     created_at        TIMESTAMPTZ  NOT NULL
                                                DEFAULT CURRENT_TIMESTAMP,
 

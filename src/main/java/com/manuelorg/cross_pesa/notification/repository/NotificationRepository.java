@@ -1,7 +1,7 @@
 package com.manuelorg.cross_pesa.notification.repository;
 
 import com.manuelorg.cross_pesa.notification.entity.Notification;
-import com.manuelorg.cross_pesa.notification.enums.NotificationStatus;
+import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -23,6 +23,9 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
     // Find notification by ID and User ID for scoped ownership checks
     Optional<Notification> findByIdAndUserId(UUID id, UUID userId);
 
-    // Poller: fetch a bounded batch of notifications by delivery status
-    List<Notification> findByStatus(NotificationStatus status, Pageable pageable);
+    // Poller: fetch a bounded batch of notifications still awaiting external
+    // dispatch, excluding IN_APP (delivered at creation) and exhausted retries.
+    // Delivery state is dispatched_at — independent of the user's read status.
+    List<Notification> findByDispatchedAtIsNullAndNotificationTypeNotAndRetryCountLessThan(
+            NotificationType type, int maxRetryCount, Pageable pageable);
 }

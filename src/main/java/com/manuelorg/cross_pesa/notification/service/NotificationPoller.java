@@ -1,7 +1,7 @@
 package com.manuelorg.cross_pesa.notification.service;
 
 import com.manuelorg.cross_pesa.notification.entity.Notification;
-import com.manuelorg.cross_pesa.notification.enums.NotificationStatus;
+import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import com.manuelorg.cross_pesa.notification.repository.NotificationRepository;
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Gauge;
@@ -39,6 +39,7 @@ public class NotificationPoller {
 
     static final String JOB_NAME = "notification-poll";
     static final int BATCH_SIZE = 100;
+    static final int MAX_RETRIES = 5;
 
     private final NotificationRepository notificationRepository;
     private final NotificationService notificationService;
@@ -70,8 +71,11 @@ public class NotificationPoller {
                     .addKeyValue("trigger", "scheduler")
                     .log("Notification poll cycle started");
 
-            List<Notification> batch = notificationRepository.findByStatus(
-                    NotificationStatus.UNREAD, PageRequest.of(0, BATCH_SIZE));
+            // Select by DELIVERY state (dispatched_at IS NULL), not read status —
+            // marking a notification READ must not cancel its SMS/email delivery.
+            List<Notification> batch = notificationRepository
+                    .findByDispatchedAtIsNullAndNotificationTypeNotAndRetryCountLessThan(
+                            NotificationType.IN_APP, MAX_RETRIES, PageRequest.of(0, BATCH_SIZE));
 
             for (Notification n : batch) {
                 processed++;

@@ -68,6 +68,14 @@ public class Notification {
     @Column(nullable = false, length = 20)
     private NotificationStatus status = NotificationStatus.UNREAD;
 
+    /**
+     * Delivery lifecycle, deliberately separate from {@code status}
+     * (UNREAD/READ is the user's inbox state). Null means external dispatch
+     * has not yet succeeded; IN_APP notifications are marked on creation.
+     */
+    @Column(name = "dispatched_at")
+    private OffsetDateTime dispatchedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private OffsetDateTime createdAt;
