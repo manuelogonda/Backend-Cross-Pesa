@@ -81,11 +81,18 @@ public class PaystackPayoutService {
             return beneficiary.getPaystackRecipientCode();
         }
 
+        if (beneficiary.getBankCode() == null || beneficiary.getBankCode().isBlank()) {
+            throw new IllegalStateException(
+                    "Beneficiary " + beneficiary.getId() + " has no bank/network code; "
+                            + "Paystack requires bank_code to register a transfer recipient");
+        }
+
         String type = resolveTransferType(beneficiary);
         Map<String, Object> payload = Map.of(
                 "type", type,
                 "name", beneficiary.getFirstName() + " " + beneficiary.getLastName(),
                 "account_number", beneficiary.getAccountNumber(),
+                "bank_code", beneficiary.getBankCode(),
                 "currency", beneficiary.getAccountCurrency().name()
         );
 
@@ -118,6 +125,14 @@ public class PaystackPayoutService {
      */
     public void cacheRecipient(java.util.UUID beneficiaryId, String recipientCode) {
         recipientCodeCache.put(beneficiaryId, recipientCode);
+    }
+
+    /**
+     * Drops any cached recipient code, e.g. when a beneficiary's routing details
+     * change and the previously registered recipient is no longer valid.
+     */
+    public void invalidateRecipient(java.util.UUID beneficiaryId) {
+        recipientCodeCache.remove(beneficiaryId);
     }
 
     private String extractRecipientCode(Map<String, Object> response) {

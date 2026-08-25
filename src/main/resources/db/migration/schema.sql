@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS beneficiaries
 
     payout_provider  VARCHAR(50)         NOT NULL DEFAULT 'M-PESA'
         CHECK (payout_provider IN ('M-PESA', 'EQUITY BANK',
-                                   'VISA', 'MASTERCARD')),
+                                   'VISA', 'MASTERCARD', 'PAYSTACK')),
 
     account_number   VARCHAR(50)         NOT NULL,
 

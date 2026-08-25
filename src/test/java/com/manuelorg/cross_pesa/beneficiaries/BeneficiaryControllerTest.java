@@ -70,6 +70,7 @@ class BeneficiaryControllerTest {
                 "MOBILE_MONEY",
                 "M-PESA",
                 "254711223344",
+                "MPESA",
                 "KES"
         );
     }
@@ -101,6 +102,7 @@ class BeneficiaryControllerTest {
                 PayoutMethod.MOBILE_MONEY,
                 PayoutProvider.MPESA,
                 "254711223344",
+                "MPESA",
                 Currency.KES
         );
 
@@ -139,6 +141,7 @@ class BeneficiaryControllerTest {
                 PayoutMethod.MOBILE_MONEY,
                 PayoutProvider.MPESA,
                 "254711223344",
+                "MPESA",
                 Currency.KES
         );
 
@@ -165,6 +168,7 @@ class BeneficiaryControllerTest {
                 PayoutMethod.MOBILE_MONEY,
                 PayoutProvider.MPESA,
                 "254711223344",
+                "MPESA",
                 Currency.KES
         );
 
@@ -185,6 +189,7 @@ class BeneficiaryControllerTest {
                 PayoutMethod.MOBILE_MONEY,
                 PayoutProvider.MPESA,
                 "254711223344",
+                "MPESA",
                 Currency.KES
         );
 
@@ -205,6 +210,7 @@ class BeneficiaryControllerTest {
                 PayoutMethod.MOBILE_MONEY,
                 PayoutProvider.MPESA,
                 "254711223344",
+                "MPESA",
                 Currency.KES
         );
 

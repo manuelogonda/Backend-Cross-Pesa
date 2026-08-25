@@ -76,6 +76,13 @@ public class Beneficiary {
     private Currency accountCurrency = Currency.KES;
 
     /**
+     * Bank or mobile-money network code of the payout provider (e.g. Paystack
+     * bank_code). Required by the gateway when registering a transfer recipient.
+     */
+    @Column(name = "bank_code", length = 20)
+    private String bankCode;
+
+    /**
      * Paystack transfer recipient code (RCP_xxx) created for this beneficiary.
      * Cached so the recipient is registered once with Paystack and reused for
      * every payout — never persisted in logs.

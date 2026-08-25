@@ -16,6 +16,7 @@ public record BeneficiaryResponse(
         String payoutMethod,
         String payoutProvider,
         String accountNumber,
+        String bankCode,
         String accountCurrency
 ) {
     public static BeneficiaryResponse fromEntity(Beneficiary b) {
@@ -31,6 +32,7 @@ public record BeneficiaryResponse(
                 b.getPayoutMethod().name(),
                 b.getPayoutProvider().getDbValue(), // Delivers clean display value like "EQUITY BANK"
                 b.getAccountNumber(),
+                b.getBankCode(),
                 b.getAccountCurrency().name()
         );
     }

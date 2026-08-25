@@ -5,6 +5,7 @@ import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryRequest;
 import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryResponse;
 import com.manuelorg.cross_pesa.beneficiaries.entity.Beneficiary;
 import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
+import com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -18,6 +19,7 @@ import java.util.UUID;
 public class BeneficiaryService {
 
     private final BeneficiaryRepository beneficiaryRepository;
+    private final PaystackPayoutService paystackPayoutService;
 
     @Transactional(readOnly = true)
     public Page<BeneficiaryResponse> getUserBeneficiaries(UUID userId, Pageable pageable) {
@@ -46,6 +48,7 @@ public class BeneficiaryService {
                 .payoutMethod(request.payoutMethod())
                 .payoutProvider(request.payoutProvider())
                 .accountNumber(request.accountNumber().trim())
+                .bankCode(request.bankCode().trim())
                 .accountCurrency(request.accountCurrency())
                 .build();
 
@@ -69,7 +72,8 @@ public class BeneficiaryService {
 
         // 2. Check routing duplicate if provider or account number changed
         boolean routingChanged = !beneficiary.getPayoutProvider().equals(request.payoutProvider())
-                || !beneficiary.getAccountNumber().equalsIgnoreCase(request.accountNumber().trim());
+                || !beneficiary.getAccountNumber().equalsIgnoreCase(request.accountNumber().trim())
+                || !request.bankCode().trim().equalsIgnoreCase(beneficiary.getBankCode());
         if (routingChanged && beneficiaryRepository.existsByUserIdAndPayoutProviderAndAccountNumber(
                 currentUser.getId(), request.payoutProvider(), request.accountNumber().trim())) {
             throw new IllegalArgumentException("You have already saved a beneficiary with this exact account number and provider.");
@@ -86,7 +90,15 @@ public class BeneficiaryService {
         beneficiary.setPayoutMethod(request.payoutMethod());
         beneficiary.setPayoutProvider(request.payoutProvider());
         beneficiary.setAccountNumber(request.accountNumber().trim());
+        beneficiary.setBankCode(request.bankCode().trim());
         beneficiary.setAccountCurrency(request.accountCurrency());
+
+        // Routing details changed — the previously registered Paystack recipient
+        // points at the old destination, so it must never be reused.
+        if (routingChanged) {
+            beneficiary.setPaystackRecipientCode(null);
+            paystackPayoutService.invalidateRecipient(beneficiary.getId());
+        }
 
         // 4. Save and return the mapped response
         Beneficiary updatedBeneficiary = beneficiaryRepository.save(beneficiary);

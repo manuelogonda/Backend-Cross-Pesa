@@ -38,6 +38,9 @@ class BeneficiaryServiceTest {
     @Mock
     private BeneficiaryRepository beneficiaryRepository;
 
+    @Mock
+    private com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService paystackPayoutService;
+
     @InjectMocks
     private BeneficiaryService beneficiaryService;
 
@@ -102,6 +105,7 @@ class BeneficiaryServiceTest {
                 PayoutMethod.MOBILE_MONEY,
                 PayoutProvider.MPESA,
                 " 254711223344 ",
+                "MPESA",
                 Currency.KES
         );
 
@@ -145,6 +149,7 @@ class BeneficiaryServiceTest {
                 PayoutMethod.MOBILE_MONEY,
                 PayoutProvider.MPESA,
                 "254711223344",
+                "MPESA",
                 Currency.KES
         );
 
@@ -194,6 +199,7 @@ class BeneficiaryServiceTest {
                 PayoutMethod.BANK_TRANSFER,
                 PayoutProvider.EQUITY_BANK,
                 " 987654321 ",
+                "EQUITYKE",
                 Currency.EUR
         );
 
@@ -227,6 +233,7 @@ class BeneficiaryServiceTest {
                 PayoutMethod.BANK_TRANSFER,
                 PayoutProvider.EQUITY_BANK,
                 "987654321",
+                "MPESA",
                 Currency.KES
         );
 
@@ -256,6 +263,7 @@ class BeneficiaryServiceTest {
                 PayoutMethod.MOBILE_MONEY,
                 PayoutProvider.MPESA,
                 "254711223344",
+                "MPESA",
                 Currency.KES
         );
 

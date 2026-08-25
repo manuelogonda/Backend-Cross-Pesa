@@ -47,6 +47,10 @@ public record BeneficiaryRequest(
         @Size(max = 50)
         String accountNumber,
 
+        @NotBlank(message = "Bank or network code is required for payouts")
+        @Size(max = 20)
+        String bankCode,
+
         @NotNull(message = "Account currency is required")
         Currency accountCurrency
 ) {}
