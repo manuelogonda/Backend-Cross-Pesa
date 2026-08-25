@@ -54,7 +54,7 @@ public class FlutterwaveService {
      * Authoritative payment details as reported by Flutterwave.
      * These values — never client-supplied ones — must be used to credit wallets.
      */
-    public record VerifiedPayment(BigDecimal amount, String currency, String customerEmail) {}
+    public record VerifiedPayment(BigDecimal amount, String currency, String customerEmail, String txRef) {}
 
     /**
      * Initialises a Flutterwave Standard checkout session.
@@ -145,7 +145,8 @@ public class FlutterwaveService {
                     VerifiedPayment verified = new VerifiedPayment(
                             new BigDecimal(data.amount()),
                             data.currency(),
-                            data.customer() != null ? data.customer().email() : null
+                            data.customer() != null ? data.customer().email() : null,
+                            data.tx_ref()
                     );
                     log.info("Transaction {} verified successfully: amount={} currency={}",
                             transactionId, verified.amount(), verified.currency());

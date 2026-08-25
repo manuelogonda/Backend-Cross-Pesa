@@ -11,10 +11,16 @@ ALTER TABLE ledger_entries
     ADD CONSTRAINT chk_ledger_entry_exclusive_side
     CHECK (debit >= 0 AND credit >= 0 AND (debit = 0) <> (credit = 0));
 
--- Monetary amounts are never negative.
+-- USER_RETAIL balances may never go negative. System wallets (LIQUIDITY /
+-- MARKUP / ROUTING) are clearing accounts whose balances are derived from the
+-- ledger and MAY legitimately go negative (e.g. outbound FX float payouts);
+-- only their locked_balance must stay non-negative.
 ALTER TABLE wallets
     ADD CONSTRAINT chk_wallet_balances_non_negative
-    CHECK (balance >= 0 AND locked_balance >= 0);
+    CHECK (
+        (wallet_type = 'USER_RETAIL' AND balance >= 0 AND locked_balance >= 0)
+        OR (wallet_type <> 'USER_RETAIL' AND locked_balance >= 0)
+    );
 
 -- Fast lookup of the latest entry per wallet (drives balance derivation).
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_wallet_created

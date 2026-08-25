@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/wallets")
@@ -62,8 +63,9 @@ public class WalletController {
         String paymentLink = flutterwaveService.initializePayment(
                 currentUser.getEmail(),
                 currentUser.getFirstName() + " " + currentUser.getLastName(),
-                request.amount().toPlainString(),
-                request.currency().name()
+                request.amount(),
+                request.currency().name(),
+                "CROSSPESA-U" + currentUser.getId() + "-" + UUID.randomUUID()
         );
 
         return ResponseEntity.ok(Map.of(
@@ -101,9 +103,12 @@ public class WalletController {
             return ResponseEntity.badRequest().body(Map.of("error", "Payment verification failed."));
         }
 
-        // 3. The verified payment must belong to the authenticated user
-        if (verified.customerEmail() == null
-                || !verified.customerEmail().equalsIgnoreCase(currentUser.getEmail())) {
+        // 3. The verified payment must belong to the authenticated user.
+        //    Ownership is established by the tx_ref we minted at initiation
+        //    (embeds the user id) — payer email is unreliable since Flutterwave
+        //    checkout lets the payer enter a different email.
+        String expectedPrefix = "CROSSPESA-U" + currentUser.getId() + "-";
+        if (verified.txRef() == null || !verified.txRef().startsWith(expectedPrefix)) {
             return ResponseEntity.badRequest().body(Map.of("error", "Payment does not belong to this account."));
         }
 

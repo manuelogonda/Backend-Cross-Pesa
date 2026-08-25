@@ -81,6 +81,9 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+  health:
+    rabbit:
+      enabled: false
   httpexchanges:
     recording:
       # Privacy: do NOT record principal/remote-address/session-id —
