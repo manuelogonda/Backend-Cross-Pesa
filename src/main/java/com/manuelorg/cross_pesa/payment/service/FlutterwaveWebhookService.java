@@ -1,6 +1,7 @@
 package com.manuelorg.cross_pesa.payment.service;
 
 import com.manuelorg.cross_pesa.payment.dto.FlutterwaveWebhookPayload;
+import com.manuelorg.cross_pesa.systemEngine.SystemWalletEngine;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
 import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
@@ -8,7 +9,9 @@ import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
@@ -26,6 +29,7 @@ public class FlutterwaveWebhookService {
 
     private final TransactionRepository transactionRepository;
     private final WalletService walletService;
+    private final SystemWalletEngine systemWalletEngine;
 
     /**
      * Processes a {@code charge.completed} (or equivalent) webhook event.
@@ -129,5 +133,91 @@ public class FlutterwaveWebhookService {
         transactionRepository.save(transaction);
         log.info("Webhook: marked Transaction {} as FAILED (gateway status='{}', txRef={}).",
                 transaction.getId(), data.status(), data.txRef());
+    }
+
+    // -------------------------------------------------------------------------
+    // Outbound transfer events (payouts)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Handles {@code transfer.completed} / {@code transfer.failed} /
+     * {@code transfer.reversed} events keyed on our internal payout reference.
+     *
+     * <p>Runs in its own transaction (REQUIRES_NEW) so the HTTP Fast-ACK response
+     * stays decoupled from business processing. Idempotent: terminal-state guard
+     * means replayed events are no-ops; the REFUND entry-class uniqueness check
+     * inside {@code executePayoutReversal} prevents double reversals under a race.
+     *
+     * @param traceId inbound MDC trace id propagated from the controller thread,
+     *                since the webhook thread may differ from the request thread
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void processTransferEvent(String payoutReference, boolean successful, String traceId) {
+        if (traceId != null) {
+            MDC.put("traceId", traceId);
+        }
+        try {
+            if (payoutReference == null || payoutReference.isBlank()) {
+                log.warn("Flutterwave transfer webhook missing reference; ignoring.");
+                return;
+            }
+
+            Transaction tx = transactionRepository.findByPayoutReference(payoutReference).orElse(null);
+            if (tx == null) {
+                log.warn("Flutterwave transfer webhook for unknown payout reference {}; ignoring.", payoutReference);
+                return;
+            }
+
+            // Only non-terminal states may transition.
+            if (tx.getStatus() != TransactionStatus.PROCESSING && tx.getStatus() != TransactionStatus.PENDING) {
+                log.atInfo()
+                        .addKeyValue("event", "flutterwave.webhook.skipped")
+                        .addKeyValue("transactionId", tx.getId())
+                        .addKeyValue("currentStatus", tx.getStatus().name())
+                        .log("Transfer webhook received for transaction already in terminal status");
+                return;
+            }
+
+            if (successful) {
+                confirmPayout(tx);
+            } else {
+                reversePayout(tx);
+            }
+        } finally {
+            MDC.remove("traceId");
+        }
+    }
+
+    /** transfer.completed: ledger was committed at initiation — mark COMPLETED. */
+    private void confirmPayout(Transaction tx) {
+        tx.setStatus(TransactionStatus.COMPLETED);
+        transactionRepository.save(tx);
+        log.atInfo()
+                .addKeyValue("event", "payout.confirmed")
+                .addKeyValue("transactionId", tx.getId())
+                .addKeyValue("provider", "FLUTTERWAVE")
+                .log("Flutterwave transfer confirmed by webhook — marked COMPLETED");
+    }
+
+    /** transfer.failed / reversed: compensating ledger reversal refunds the user. */
+    private void reversePayout(Transaction tx) {
+        log.atWarn()
+                .addKeyValue("event", "payout.reversal.triggered")
+                .addKeyValue("transactionId", tx.getId())
+                .log("Reversing settlement and refunding user wallet");
+
+        systemWalletEngine.executePayoutReversal(
+                tx,
+                tx.getSourceWallet().getId(),
+                tx.getSourceCurrency(),
+                tx.getGrossAmount(),
+                tx.getMarkupFee(),
+                tx.getRoutingFee(),
+                tx.getDestinationCurrency(),
+                tx.getDestinationAmount(),
+                null
+        );
+        tx.setStatus(TransactionStatus.FAILED);
+        transactionRepository.save(tx);
     }
 }

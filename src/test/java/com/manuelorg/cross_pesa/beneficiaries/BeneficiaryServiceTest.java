@@ -39,7 +39,7 @@ class BeneficiaryServiceTest {
     private BeneficiaryRepository beneficiaryRepository;
 
     @Mock
-    private com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService paystackPayoutService;
+    private com.manuelorg.cross_pesa.payment.flutterwave.FlutterwaveTransferService flutterwaveTransferService;
 
     @InjectMocks
     private BeneficiaryService beneficiaryService;

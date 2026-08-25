@@ -120,6 +120,8 @@ flutterwave:
   base-url: https://api.flutterwave.com/v3
   redirect-url: http://localhost:5173/wallet/verify-topup
   webhook-secret: ${FLW_WEBHOOK_SECRET}
+  # Public URL of the unified Flutterwave webhook; sent as callback_url on transfers.
+  transfer-webhook-url: ${FLW_TRANSFER_WEBHOOK_URL:}
 
 # Inbound webhook secrets. If unset, the corresponding webhooks reject all traffic.
 webhook:
@@ -145,8 +147,3 @@ cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME}
   api-key: ${CLOUDINARY_API_KEY}
   api-secret: ${CLOUDINARY_API_SECRET}
-
-paystack:
-    secret-key: ${PAYSTACK_SECRET}
-    public-key: ${PAYSTACK_PUBLIC}
-    base-url: https://api.paystack.co

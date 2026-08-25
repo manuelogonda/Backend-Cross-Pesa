@@ -29,10 +29,10 @@ public interface BeneficiaryRepository extends JpaRepository<Beneficiary, UUID> 
     );
 
     /**
-     * Persists the cached Paystack transfer recipient code. Must be called
-     * within an active transaction (see TransactionService payout hook).
+     * Persists the cached gateway transfer recipient code. Must be called
+     * within an active transaction.
      */
     @Modifying
-    @Query("update Beneficiary b set b.paystackRecipientCode = :code where b.id = :id")
-    int updatePaystackRecipientCode(@Param("id") UUID id, @Param("code") String code);
+    @Query("update Beneficiary b set b.gatewayRecipientCode = :code where b.id = :id")
+    int updateGatewayRecipientCode(@Param("id") UUID id, @Param("code") String code);
 }

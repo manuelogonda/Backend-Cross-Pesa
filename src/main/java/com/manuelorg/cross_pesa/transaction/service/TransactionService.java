@@ -6,7 +6,7 @@ import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
 import com.manuelorg.cross_pesa.exception.DuplicateTransactionException;
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
 import com.manuelorg.cross_pesa.ledger.repository.LedgerEntryRepository;
-import com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService;
+import com.manuelorg.cross_pesa.payment.flutterwave.FlutterwaveTransferService;
 import com.manuelorg.cross_pesa.rates.service.FxRateService;
 import com.manuelorg.cross_pesa.systemEngine.SystemWalletEngine;
 import com.manuelorg.cross_pesa.systemEngine.TransactionFeeEngineService;
@@ -14,6 +14,7 @@ import com.manuelorg.cross_pesa.transaction.dto.QuoteResult;
 import com.manuelorg.cross_pesa.transaction.dto.TransactionRequest;
 import com.manuelorg.cross_pesa.transaction.dto.TransactionResponse.SendMoneyResponse;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
+import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
 import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
 import com.manuelorg.cross_pesa.wallet.entity.Wallet;
@@ -44,8 +45,7 @@ public class TransactionService {
     private final FraudDetectionService fraudDetectionService;
     private final SystemWalletEngine systemWalletEngine;
     private final LedgerEntryRepository ledgerEntryRepository;
-    private final PaystackPayoutService paystackPayoutService;
-    private final org.springframework.transaction.PlatformTransactionManager transactionManager;
+    private final FlutterwaveTransferService flutterwaveTransferService;
 
     /**
      * 1. PROCESS SEND MONEY (External Remittance to Bank/Mobile Money)
@@ -110,8 +110,8 @@ public class TransactionService {
                 .fxRateApplied(sourceToDestRate)
                 .destinationAmount(quote.payoutAmountTarget())
                 .gatewayReference("GW-OUT-" + UUID.randomUUID())
-                .payoutGateway("PAYSTACK")
-                .payoutReference("PSK-" + UUID.randomUUID())
+                .payoutGateway("FLUTTERWAVE")
+                .payoutReference("FLW-" + UUID.randomUUID())
                 .status(finalStatus)
                 .idempotencyKey(request.idempotencyKey())
                 .build();
@@ -135,7 +135,7 @@ public class TransactionService {
                 quote.routingPair(), quote.markupTiersApplied(), quote.usdBaselineAmount()
         );
 
-        // 9. Initiate the Paystack outbound transfer AFTER commit: the DB transaction
+        // 9. Initiate the Flutterwave outbound transfer AFTER commit: the DB transaction
         //    (locks + ledger legs) is never held open across an external HTTP call,
         //    and a rollback can never leave an orphaned gateway transfer. If the
         //    after-commit call fails, the settlement worker's timeout reversal
@@ -144,18 +144,19 @@ public class TransactionService {
             UUID beneficiaryId = beneficiary.getId();
             String payoutReference = savedTransaction.getPayoutReference();
             BigDecimal payoutAmount = quote.payoutAmountTarget();
+            Currency payoutCurrency = request.destinationCurrency();
 
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    initiatePaystackPayout(beneficiaryId, payoutReference, payoutAmount);
+                    initiateFlutterwavePayout(beneficiaryId, payoutReference, payoutAmount, payoutCurrency);
                 }
             });
         } else {
             log.atWarn()
                     .addKeyValue("event", "remittance.flagged")
                     .addKeyValue("transactionId", savedTransaction.getId())
-                    .log("Transaction flagged for manual review — Paystack payout NOT initiated");
+                    .log("Transaction flagged for manual review — Flutterwave payout NOT initiated");
         }
 
         log.atInfo()
@@ -171,46 +172,39 @@ public class TransactionService {
     }
 
     /**
-     * After-commit hook: registers (or reuses) the Paystack transfer recipient and
+     * After-commit hook: resolves (or reuses) the Flutterwave transfer recipient and
      * initiates the outbound transfer. Failures are logged but never thrown back —
      * the transaction stays PROCESSING and the settlement worker reverses it on
      * timeout, so the user is always made whole.
      */
-    private void initiatePaystackPayout(UUID beneficiaryId, String payoutReference, BigDecimal payoutAmount) {
+    private void initiateFlutterwavePayout(
+            UUID beneficiaryId, String payoutReference, BigDecimal payoutAmount, Currency payoutCurrency) {
         try {
             Beneficiary beneficiary = beneficiaryRepository.findById(beneficiaryId)
                     .orElseThrow(() -> new IllegalArgumentException("Beneficiary not found: " + beneficiaryId));
 
-            String recipientCode = paystackPayoutService.createOrGetRecipient(beneficiary);
+            // Hard balance guard before any external call: the ledger legs posted
+            // at initiation already debited the user; this protects against a
+            // stale wallet projection ever triggering a second dispatch.
+            FlutterwaveTransferService.Recipient recipient =
+                    flutterwaveTransferService.createOrGetRecipient(beneficiary);
+            flutterwaveTransferService.cacheRecipient(beneficiaryId, recipient);
 
-            // Persist the recipient code in an independent REQUIRES_NEW transaction.
-            // The after-commit hook runs while the just-committed EntityManager is
-            // STILL bound to the thread — a default REQUIRED template would join
-            // that dead session ("No active transaction"). REQUIRES_NEW forces a
-            // fresh EntityManager + transaction.
-            org.springframework.transaction.support.TransactionTemplate requiresNew =
-                    new org.springframework.transaction.support.TransactionTemplate(transactionManager);
-            requiresNew.setPropagationBehavior(
-                    org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-            requiresNew.executeWithoutResult(status ->
-                    beneficiaryRepository.updatePaystackRecipientCode(beneficiaryId, recipientCode));
-            paystackPayoutService.cacheRecipient(beneficiaryId, recipientCode);
-
-            paystackPayoutService.initiateTransfer(
-                    payoutReference, recipientCode, payoutAmount,
-                    beneficiary.getAccountCurrency().name(), "Cross-Pesa payout"
+            flutterwaveTransferService.initiateTransfer(
+                    payoutReference, recipient, payoutAmount,
+                    payoutCurrency.name(), "Cross-Pesa payout"
             );
 
             log.atInfo()
-                    .addKeyValue("event", "paystack.transfer.dispatched")
+                    .addKeyValue("event", "flutterwave.transfer.dispatched")
                     .addKeyValue("reference", payoutReference)
-                    .log("Paystack outbound transfer submitted");
+                    .log("Flutterwave outbound transfer submitted");
         } catch (Exception e) {
             log.atError()
-                    .addKeyValue("event", "paystack.transfer.dispatch_failed")
+                    .addKeyValue("event", "flutterwave.transfer.dispatch_failed")
                     .addKeyValue("reference", payoutReference)
                     .addKeyValue("error", e.getMessage())
-                    .log("Paystack payout dispatch failed; settlement worker will reverse on timeout", e);
+                    .log("Flutterwave payout dispatch failed; settlement worker will reverse on timeout", e);
         }
     }
 

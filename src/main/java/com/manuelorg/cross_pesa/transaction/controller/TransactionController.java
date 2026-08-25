@@ -42,7 +42,7 @@ public class TransactionController {
     /**
      * POST /api/v1/transactions/p2p — REMOVED.
      * P2P wallet-to-wallet transfers are deprecated; outbound funds now flow
-     * exclusively through the saved-beneficiary Paystack payout workflow
+     * exclusively through the saved-beneficiary Flutterwave payout workflow
      * (POST /api/v1/transactions/send).
      */
 

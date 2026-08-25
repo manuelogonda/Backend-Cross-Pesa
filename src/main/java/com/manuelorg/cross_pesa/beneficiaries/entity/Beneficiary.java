@@ -76,19 +76,19 @@ public class Beneficiary {
     private Currency accountCurrency = Currency.KES;
 
     /**
-     * Bank or mobile-money network code of the payout provider (e.g. Paystack
-     * bank_code). Required by the gateway when registering a transfer recipient.
+     * Bank or mobile-money network code of the payout provider (e.g. Flutterwave
+     * account_bank code). Required by the gateway when initiating a transfer.
      */
     @Column(name = "bank_code", length = 20)
     private String bankCode;
 
     /**
-     * Paystack transfer recipient code (RCP_xxx) created for this beneficiary.
-     * Cached so the recipient is registered once with Paystack and reused for
-     * every payout — never persisted in logs.
+     * Gateway transfer recipient identifier / descriptor cache (Flutterwave).
+     * Reserved so a future server-side recipient object can be persisted and
+     * reused for every payout — never logged.
      */
-    @Column(name = "paystack_recipient_code", length = 100)
-    private String paystackRecipientCode;
+    @Column(name = "gateway_recipient_code", length = 100)
+    private String gatewayRecipientCode;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

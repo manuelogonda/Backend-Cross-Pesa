@@ -8,7 +8,7 @@ import java.util.UUID;
 public class TransactionResponse {
 
     /**
-     * Response DTO for external remittances (Paystack beneficiary payouts).
+     * Response DTO for external remittances (Flutterwave beneficiary payouts).
      */
     public record SendMoneyResponse(
             UUID id,

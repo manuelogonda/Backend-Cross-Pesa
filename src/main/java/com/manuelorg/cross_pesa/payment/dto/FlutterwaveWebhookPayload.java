@@ -35,6 +35,7 @@ public record FlutterwaveWebhookPayload(
             Long id,
             @JsonProperty("tx_ref") String txRef,
             @JsonProperty("flw_ref") String flwRef,
+            String reference,
             String status,
             BigDecimal amount,
             String currency,

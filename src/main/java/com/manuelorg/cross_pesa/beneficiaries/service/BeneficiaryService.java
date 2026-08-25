@@ -5,7 +5,7 @@ import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryRequest;
 import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryResponse;
 import com.manuelorg.cross_pesa.beneficiaries.entity.Beneficiary;
 import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
-import com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService;
+import com.manuelorg.cross_pesa.payment.flutterwave.FlutterwaveTransferService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -19,7 +19,7 @@ import java.util.UUID;
 public class BeneficiaryService {
 
     private final BeneficiaryRepository beneficiaryRepository;
-    private final PaystackPayoutService paystackPayoutService;
+    private final FlutterwaveTransferService flutterwaveTransferService;
 
     @Transactional(readOnly = true)
     public Page<BeneficiaryResponse> getUserBeneficiaries(UUID userId, Pageable pageable) {
@@ -93,11 +93,11 @@ public class BeneficiaryService {
         beneficiary.setBankCode(request.bankCode().trim());
         beneficiary.setAccountCurrency(request.accountCurrency());
 
-        // Routing details changed — the previously registered Paystack recipient
+        // Routing details changed — the previously cached recipient descriptor
         // points at the old destination, so it must never be reused.
         if (routingChanged) {
-            beneficiary.setPaystackRecipientCode(null);
-            paystackPayoutService.invalidateRecipient(beneficiary.getId());
+            beneficiary.setGatewayRecipientCode(null);
+            flutterwaveTransferService.invalidateRecipient(beneficiary.getId());
         }
 
         // 4. Save and return the mapped response

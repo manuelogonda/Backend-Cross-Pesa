@@ -58,12 +58,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/**").permitAll()
                         // Allow Google OAuth2 login flow endpoints
                         .requestMatchers("/oauth2/**", "/login/oauth2/**").permitAll()
-                        // Flutterwave webhook — called by Flutterwave servers, no JWT
+                        // Flutterwave webhook (top-ups + transfers) — verif-hash shared secret, no JWT
                         .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/flutterwave").permitAll()
                         // Gateway payout webhook — HMAC-signed (X-Webhook-Signature), no JWT
                         .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/payout-update").permitAll()
-                        // Paystack payout webhook — HMAC-SHA512-signed (x-paystack-signature), no JWT
-                        .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/paystack").permitAll()
                         // Smile ID KYC webhook — shared-secret token (X-Callback-Token), no JWT
                         .requestMatchers(HttpMethod.POST, "/api/v1/kyc/webhook/smile-id").permitAll()
                         // Actuator: liveness/readiness public, everything else admin-only

@@ -10,7 +10,7 @@ import com.manuelorg.cross_pesa.exception.DuplicateTransactionException;
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
 import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
 import com.manuelorg.cross_pesa.ledger.repository.LedgerEntryRepository;
-import com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService;
+import com.manuelorg.cross_pesa.payment.flutterwave.FlutterwaveTransferService;
 import com.manuelorg.cross_pesa.rates.dto.FxRateResponse;
 import com.manuelorg.cross_pesa.rates.service.FxRateService;
 import com.manuelorg.cross_pesa.transaction.dto.TransactionRequest;
@@ -49,12 +49,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Integration tests for the saved-beneficiary Paystack outbound payout flow
+ * Integration tests for the saved-beneficiary Flutterwave outbound payout flow
  * (processSendMoney). P2P transfers were removed permanently.
  *
  * Runs against a real PostgreSQL schema with the REAL fee engine, ledger and
  * system wallet engine. External integrations (FX provider, fraud rules,
- * Paystack HTTP) are mocked for determinism.
+ * Flutterwave HTTP) are mocked for determinism.
  */
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:postgresql://localhost:5432/crosspesa?currentSchema=crosspesa_test",
@@ -63,7 +63,7 @@ import static org.mockito.Mockito.when;
         "spring.flyway.enabled=false",
         "spring.docker.compose.enabled=false"
 })
-@DisplayName("TransactionService — Paystack Beneficiary Payout Integration Tests")
+@DisplayName("TransactionService — Flutterwave Beneficiary Payout Integration Tests")
 class TransactionServiceIntegrationTest {
 
     @Autowired
@@ -94,7 +94,7 @@ class TransactionServiceIntegrationTest {
     private FraudDetectionService fraudDetectionService;
 
     @MockitoBean
-    private PaystackPayoutService paystackPayoutService;
+    private FlutterwaveTransferService flutterwaveTransferService;
 
     private User sender;
     private Wallet sourceWallet;
@@ -102,7 +102,8 @@ class TransactionServiceIntegrationTest {
 
     private static final BigDecimal USD_TO_KES = new BigDecimal("129.00");
     private static final BigDecimal KES_TO_USD = new BigDecimal("0.0078");
-    private static final String RECIPIENT_CODE = "RCP_test_recipient_code";
+    private static final FlutterwaveTransferService.Recipient RECIPIENT =
+            new FlutterwaveTransferService.Recipient(null, "Amina Wanjiku", "MPS", "254700000001", "KES", PayoutMethod.MOBILE_MONEY);
 
     @BeforeEach
     void seed() {
@@ -123,16 +124,16 @@ class TransactionServiceIntegrationTest {
                 .phoneNumber("+254700000001")
                 .countryCode("KE")
                 .payoutMethod(PayoutMethod.MOBILE_MONEY)
-                .payoutProvider(PayoutProvider.PAYSTACK)
-                .accountNumber("254700000001")
+                .payoutProvider(PayoutProvider.MPESA)
+                .accountNumber("254700000001").bankCode("MPESA")
                 .accountCurrency(Currency.KES)
                 .build());
 
         when(fraudDetectionService.isSuspiciousTransaction(any(UUID.class), any(BigDecimal.class), any()))
                 .thenReturn(false);
 
-        when(paystackPayoutService.createOrGetRecipient(any(Beneficiary.class)))
-                .thenReturn(RECIPIENT_CODE);
+        when(flutterwaveTransferService.createOrGetRecipient(any(Beneficiary.class)))
+                .thenReturn(RECIPIENT);
 
         stubFxRates();
     }
@@ -151,15 +152,15 @@ class TransactionServiceIntegrationTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("given funded wallet, when send money to beneficiary, then wallet debited, ledger committed and Paystack transfer dispatched after commit")
+    @DisplayName("given funded wallet, when send money to beneficiary, then wallet debited, ledger committed and Flutterwave transfer dispatched after commit")
     void givenFundedWallet_whenSendMoney_thenLedgerCommittedAndPaystackDispatched() {
         BigDecimal grossAmount = new BigDecimal("1000.0000");
 
         SendMoneyResponse response = transactionService.processSendMoney(sender, sendRequest(grossAmount));
 
         assertThat(response.status()).isEqualTo("PROCESSING");
-        assertThat(response.payoutGateway()).isEqualTo("PAYSTACK");
-        assertThat(response.payoutReference()).startsWith("PSK-");
+        assertThat(response.payoutGateway()).isEqualTo("FLUTTERWAVE");
+        assertThat(response.payoutReference()).startsWith("FLW-");
 
         // Source wallet debited by gross + total fees
         Wallet sourceAfter = walletRepository.findById(sourceWallet.getId()).orElseThrow();
@@ -173,15 +174,11 @@ class TransactionServiceIntegrationTest {
                 .setScale(4, RoundingMode.HALF_UP);
         assertThat(response.amountReceived()).isEqualByComparingTo(expectedPayout);
 
-        // Paystack recipient registered exactly once and transfer initiated once
-        verify(paystackPayoutService).createOrGetRecipient(any(Beneficiary.class));
-        verify(paystackPayoutService).initiateTransfer(
-                eq(response.payoutReference()), eq(RECIPIENT_CODE), any(BigDecimal.class),
-                eq("KES"), anyString());
-
-        // Recipient code persisted for future payouts
-        Beneficiary after = beneficiaryRepository.findById(beneficiary.getId()).orElseThrow();
-        assertThat(after.getPaystackRecipientCode()).isEqualTo(RECIPIENT_CODE);
+        // Recipient resolved exactly once and transfer initiated once
+        verify(flutterwaveTransferService).createOrGetRecipient(any(Beneficiary.class));
+        verify(flutterwaveTransferService).initiateTransfer(
+                eq(response.payoutReference()), eq(RECIPIENT), any(BigDecimal.class),
+                eq("USD"), anyString());
     }
 
     @Test
@@ -194,7 +191,7 @@ class TransactionServiceIntegrationTest {
 
         // Per-currency double-entry invariant holds EXCEPT for the payout
         // currency, where an unmatched FX_CLEARING debit is correct by design:
-        // liquidity permanently leaves the system pool towards Paystack.
+        // liquidity permanently leaves the system pool towards the external payout provider.
         for (Currency currency : Currency.values()) {
             BigDecimal debits = sumSide(legs, currency, true);
             BigDecimal credits = sumSide(legs, currency, false);
@@ -217,7 +214,7 @@ class TransactionServiceIntegrationTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("given identical payload replayed with same idempotencyKey, then duplicate rejected and Paystack called exactly once")
+    @DisplayName("given identical payload replayed with same idempotencyKey, then duplicate rejected and Flutterwave called exactly once")
     void givenReplayedIdempotencyKey_whenProcessedTwice_thenNoDoubleChargeOrDoublePayout() {
         BigDecimal grossAmount = new BigDecimal("250.0000");
         TransactionRequest.SendMoneyRequest request = sendRequest(grossAmount);
@@ -228,10 +225,10 @@ class TransactionServiceIntegrationTest {
                 .hasMessageContaining("Duplicate transaction detected");
 
         assertThat(transactionRepository.count()).isEqualTo(1);
-        // Exactly ONE Paystack dispatch across both attempts (duplicate rejected
+        // Exactly ONE Flutterwave dispatch across both attempts (duplicate rejected
         // before any gateway call).
-        verify(paystackPayoutService, times(1)).initiateTransfer(
-                anyString(), anyString(), any(BigDecimal.class), anyString(), anyString());
+        verify(flutterwaveTransferService, times(1)).initiateTransfer(
+                anyString(), any(FlutterwaveTransferService.Recipient.class), any(BigDecimal.class), anyString(), anyString());
     }
 
     // -------------------------------------------------------------------------
@@ -239,8 +236,8 @@ class TransactionServiceIntegrationTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("given suspicious transaction flagged by fraud engine, then no Paystack dispatch occurs")
-    void givenFlaggedTransaction_whenSendMoney_thenPaystackNotCalled() {
+    @DisplayName("given suspicious transaction flagged by fraud engine, then no Flutterwave dispatch occurs")
+    void givenFlaggedTransaction_whenSendMoney_thenFlutterwaveNotCalled() {
         when(fraudDetectionService.isSuspiciousTransaction(any(UUID.class), any(BigDecimal.class), any()))
                 .thenReturn(true);
 
@@ -248,8 +245,8 @@ class TransactionServiceIntegrationTest {
                 sender, sendRequest(new BigDecimal("400.0000")));
 
         assertThat(response.status()).isEqualTo("FLAGGED");
-        verify(paystackPayoutService, never()).initiateTransfer(
-                anyString(), anyString(), any(), anyString(), anyString());
+        verify(flutterwaveTransferService, never()).initiateTransfer(
+                anyString(), any(), any(), anyString(), anyString());
     }
 
     @Test
@@ -264,8 +261,8 @@ class TransactionServiceIntegrationTest {
 
         assertThat(transactionRepository.count()).isEqualTo(transactionsBefore);
         assertThat(ledgerEntryRepository.count()).isEqualTo(0);
-        verify(paystackPayoutService, never()).initiateTransfer(
-                anyString(), anyString(), any(), anyString(), anyString());
+        verify(flutterwaveTransferService, never()).initiateTransfer(
+                anyString(), any(), any(), anyString(), anyString());
     }
 
     // -------------------------------------------------------------------------

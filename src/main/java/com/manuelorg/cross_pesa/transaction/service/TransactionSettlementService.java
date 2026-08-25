@@ -1,6 +1,6 @@
 package com.manuelorg.cross_pesa.transaction.service;
 
-import com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService;
+import com.manuelorg.cross_pesa.payment.flutterwave.FlutterwaveTransferService;
 import com.manuelorg.cross_pesa.systemEngine.SystemWalletEngine;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
@@ -22,7 +22,7 @@ public class TransactionSettlementService {
 
     private final TransactionRepository transactionRepository;
     private final SystemWalletEngine systemWalletEngine;
-    private final PaystackPayoutService paystackPayoutService;
+    private final FlutterwaveTransferService flutterwaveTransferService;
 
     /**
      * How long a PROCESSING payout may remain unconfirmed before we treat it as failed,
@@ -105,24 +105,24 @@ public class TransactionSettlementService {
     /**
      * Queries the external payout provider for the transfer outcome.
      *
-     * PAYSTACK payouts are verified via GET /transfer/verify/{reference} using the
-     * internal payoutReference. Provider status mapping:
-     *   success  → CONFIRMED
-     *   failed / reversed / cancelled → FAILED
-     *   anything else (otp, processing, pending) or a lookup error → PENDING,
+     * FLUTTERWAVE payouts are verified via GET /transfers?reference={payoutReference}.
+     * Provider status mapping:
+     *   SUCCESSFUL  → CONFIRMED
+     *   FAILED / CANCELLED / REVERSED → FAILED
+     *   anything else (PENDING, NEW, ONGOING) or a lookup error → PENDING,
      *   so the existing timeout reversal remains the safety net.
      */
     private PayoutStatus checkExternalPayoutStatus(Transaction tx) {
-        if (!"PAYSTACK".equalsIgnoreCase(tx.getPayoutGateway())) {
+        if (!"FLUTTERWAVE".equalsIgnoreCase(tx.getPayoutGateway())) {
             return PayoutStatus.PENDING;
         }
-        String providerStatus = paystackPayoutService.verifyTransferStatus(tx.getPayoutReference());
+        String providerStatus = flutterwaveTransferService.verifyTransferStatus(tx.getPayoutReference());
         if (providerStatus == null) {
             return PayoutStatus.PENDING;
         }
-        return switch (providerStatus.toLowerCase()) {
-            case "success" -> PayoutStatus.CONFIRMED;
-            case "failed", "reversed", "cancelled" -> PayoutStatus.FAILED;
+        return switch (providerStatus.toUpperCase()) {
+            case "SUCCESSFUL" -> PayoutStatus.CONFIRMED;
+            case "FAILED", "CANCELLED", "REVERSED" -> PayoutStatus.FAILED;
             default -> PayoutStatus.PENDING;
         };
     }
