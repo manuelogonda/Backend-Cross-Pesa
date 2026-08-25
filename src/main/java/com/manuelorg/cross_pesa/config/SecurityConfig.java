@@ -62,6 +62,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/flutterwave").permitAll()
                         // Gateway payout webhook — HMAC-signed (X-Webhook-Signature), no JWT
                         .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/payout-update").permitAll()
+                        // Paystack payout webhook — HMAC-SHA512-signed (x-paystack-signature), no JWT
+                        .requestMatchers(HttpMethod.POST, "/api/v1/webhooks/paystack").permitAll()
                         // Smile ID KYC webhook — shared-secret token (X-Callback-Token), no JWT
                         .requestMatchers(HttpMethod.POST, "/api/v1/kyc/webhook/smile-id").permitAll()
                         // Actuator: liveness/readiness public, everything else admin-only

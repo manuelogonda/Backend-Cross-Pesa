@@ -1,5 +1,6 @@
 package com.manuelorg.cross_pesa.transaction.service;
 
+import com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService;
 import com.manuelorg.cross_pesa.systemEngine.SystemWalletEngine;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
@@ -21,6 +22,7 @@ public class TransactionSettlementService {
 
     private final TransactionRepository transactionRepository;
     private final SystemWalletEngine systemWalletEngine;
+    private final PaystackPayoutService paystackPayoutService;
 
     /**
      * How long a PROCESSING payout may remain unconfirmed before we treat it as failed,
@@ -101,14 +103,27 @@ public class TransactionSettlementService {
     }
 
     /**
-     * Queries the external payment provider for the payout outcome.
+     * Queries the external payout provider for the transfer outcome.
      *
-     * TODO: Replace with a real Flutterwave / M-Pesa / Paystack transfer-status call using
-     * tx.getPayoutReference(). Until a provider integration exists this returns PENDING,
-     * meaning payouts will be reversed (refunded) once the timeout elapses — never silently
-     * marked COMPLETED like the previous stub did.
+     * PAYSTACK payouts are verified via GET /transfer/verify/{reference} using the
+     * internal payoutReference. Provider status mapping:
+     *   success  → CONFIRMED
+     *   failed / reversed / cancelled → FAILED
+     *   anything else (otp, processing, pending) or a lookup error → PENDING,
+     *   so the existing timeout reversal remains the safety net.
      */
     private PayoutStatus checkExternalPayoutStatus(Transaction tx) {
-        return PayoutStatus.PENDING;
+        if (!"PAYSTACK".equalsIgnoreCase(tx.getPayoutGateway())) {
+            return PayoutStatus.PENDING;
+        }
+        String providerStatus = paystackPayoutService.verifyTransferStatus(tx.getPayoutReference());
+        if (providerStatus == null) {
+            return PayoutStatus.PENDING;
+        }
+        return switch (providerStatus.toLowerCase()) {
+            case "success" -> PayoutStatus.CONFIRMED;
+            case "failed", "reversed", "cancelled" -> PayoutStatus.FAILED;
+            default -> PayoutStatus.PENDING;
+        };
     }
 }

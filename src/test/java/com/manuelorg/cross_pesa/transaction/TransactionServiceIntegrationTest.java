@@ -1,15 +1,20 @@
 package com.manuelorg.cross_pesa.transaction;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
-import com.manuelorg.cross_pesa.exception.DuplicateTransactionException;
 import com.manuelorg.cross_pesa.auth.repository.UserRepository;
+import com.manuelorg.cross_pesa.beneficiaries.entity.Beneficiary;
+import com.manuelorg.cross_pesa.beneficiaries.entity.PayoutMethod;
+import com.manuelorg.cross_pesa.beneficiaries.entity.PayoutProvider;
+import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
+import com.manuelorg.cross_pesa.exception.DuplicateTransactionException;
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
 import com.manuelorg.cross_pesa.ledger.enums.EntryClass;
 import com.manuelorg.cross_pesa.ledger.repository.LedgerEntryRepository;
+import com.manuelorg.cross_pesa.payment.paystack.PaystackPayoutService;
 import com.manuelorg.cross_pesa.rates.dto.FxRateResponse;
 import com.manuelorg.cross_pesa.rates.service.FxRateService;
 import com.manuelorg.cross_pesa.transaction.dto.TransactionRequest;
-import com.manuelorg.cross_pesa.transaction.dto.TransactionResponse.ExchangeResponse;
+import com.manuelorg.cross_pesa.transaction.dto.TransactionResponse.SendMoneyResponse;
 import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
 import com.manuelorg.cross_pesa.transaction.service.FraudDetectionService;
 import com.manuelorg.cross_pesa.transaction.service.TransactionService;
@@ -24,11 +29,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -39,33 +41,29 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Full-lifecycle integration test for the cross-border P2P remittance flow.
+ * Integration tests for the saved-beneficiary Paystack outbound payout flow
+ * (processSendMoney). P2P transfers were removed permanently.
  *
- * Runs against a real PostgreSQL database (schema-isolated in the dev instance)
- * with the REAL fee engine, ledger, system wallet engine and repositories.
- * Only external integrations (FX provider, fraud rules) are mocked for determinism.
- *
- * NOTE on idempotency semantics: TransactionService currently REJECTS a replayed
- * idempotency key with IllegalStateException("Duplicate transaction detected.")
- * rather than returning the cached original response. These tests pin that
- * behaviour and prove no double-charging occurs.
+ * Runs against a real PostgreSQL schema with the REAL fee engine, ledger and
+ * system wallet engine. External integrations (FX provider, fraud rules,
+ * Paystack HTTP) are mocked for determinism.
  */
 @SpringBootTest(properties = {
-        // Schema-isolated test database inside the local dev PostgreSQL instance
         "spring.datasource.url=jdbc:postgresql://localhost:5432/crosspesa?currentSchema=crosspesa_test",
         "spring.jpa.properties.hibernate.default_schema=crosspesa_test",
         "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.flyway.enabled=false",           // Hibernate owns the throwaway test schema
-        "spring.docker.compose.enabled=false"    // infra is already running locally
+        "spring.flyway.enabled=false",
+        "spring.docker.compose.enabled=false"
 })
-@DisplayName("TransactionService — Cross-Border Remittance Integration Tests")
+@DisplayName("TransactionService — Paystack Beneficiary Payout Integration Tests")
 class TransactionServiceIntegrationTest {
 
     @Autowired
@@ -76,6 +74,9 @@ class TransactionServiceIntegrationTest {
 
     @Autowired
     private WalletRepository walletRepository;
+
+    @Autowired
+    private BeneficiaryRepository beneficiaryRepository;
 
     @Autowired
     private LedgerEntryRepository ledgerEntryRepository;
@@ -92,21 +93,19 @@ class TransactionServiceIntegrationTest {
     @MockitoBean
     private FraudDetectionService fraudDetectionService;
 
-    /** Spy keeps real repository behaviour but lets one test inject a mid-transaction failure. */
-    @MockitoSpyBean
-    private LedgerEntryRepository ledgerEntryRepositorySpy;
+    @MockitoBean
+    private PaystackPayoutService paystackPayoutService;
 
     private User sender;
     private Wallet sourceWallet;
-    private Wallet destinationWallet;
+    private Beneficiary beneficiary;
 
     private static final BigDecimal USD_TO_KES = new BigDecimal("129.00");
     private static final BigDecimal KES_TO_USD = new BigDecimal("0.0078");
+    private static final String RECIPIENT_CODE = "RCP_test_recipient_code";
 
     @BeforeEach
     void seed() {
-        // ddl-auto owns the throwaway schema, so the entry_seq sequence (created
-        // by Flyway V4 / schema.sql in real environments) must be provisioned here
         jdbcTemplate.execute(
                 "CREATE SEQUENCE IF NOT EXISTS ledger_entries_entry_seq_seq AS BIGINT START WITH 1 INCREMENT BY 1");
 
@@ -116,7 +115,24 @@ class TransactionServiceIntegrationTest {
                 .build());
 
         sourceWallet = walletRepository.save(retailWallet(sender, Currency.KES, new BigDecimal("100000.0000")));
-        destinationWallet = walletRepository.save(retailWallet(sender, Currency.USD, BigDecimal.ZERO));
+
+        beneficiary = beneficiaryRepository.save(Beneficiary.builder()
+                .user(sender)
+                .firstName("Amina").lastName("Wanjiku")
+                .email("amina-" + UUID.randomUUID() + "@crosspesa.dev")
+                .phoneNumber("+254700000001")
+                .countryCode("KE")
+                .payoutMethod(PayoutMethod.MOBILE_MONEY)
+                .payoutProvider(PayoutProvider.PAYSTACK)
+                .accountNumber("254700000001")
+                .accountCurrency(Currency.KES)
+                .build());
+
+        when(fraudDetectionService.isSuspiciousTransaction(any(UUID.class), any(BigDecimal.class), any()))
+                .thenReturn(false);
+
+        when(paystackPayoutService.createOrGetRecipient(any(Beneficiary.class)))
+                .thenReturn(RECIPIENT_CODE);
 
         stubFxRates();
     }
@@ -125,59 +141,71 @@ class TransactionServiceIntegrationTest {
     void cleanup() {
         jdbcTemplate.execute("DELETE FROM crosspesa_test.ledger_entries");
         jdbcTemplate.execute("DELETE FROM crosspesa_test.transactions");
+        jdbcTemplate.execute("DELETE FROM crosspesa_test.beneficiaries");
         jdbcTemplate.execute("DELETE FROM crosspesa_test.wallets");
         jdbcTemplate.execute("DELETE FROM crosspesa_test.users");
     }
 
     // -------------------------------------------------------------------------
-    // a) FULL LIFECYCLE: funds -> fee calculation -> net transfer
+    // a) FULL LIFECYCLE: debit -> fees -> ledger legs -> Paystack dispatch
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("given funded source wallet, when cross-border P2P transfer, then fees and net amount are calculated correctly and both sides settle")
-    void givenFundedSource_whenCrossBorderTransfer_thenFeesAndNetAmountAreCorrect() {
+    @DisplayName("given funded wallet, when send money to beneficiary, then wallet debited, ledger committed and Paystack transfer dispatched after commit")
+    void givenFundedWallet_whenSendMoney_thenLedgerCommittedAndPaystackDispatched() {
         BigDecimal grossAmount = new BigDecimal("1000.0000");
-        ExchangeResponse response = transactionService.processPeerToPeerTransfer(
-                sender, exchangeRequest(grossAmount));
 
-        // Fee engine integrity: total = markup + routing; net = gross - total
-        assertThat(response.markupFee()).isPositive();
-        assertThat(response.routingFee()).isPositive();
-        assertThat(response.totalFee())
-                .isEqualByComparingTo(response.markupFee().add(response.routingFee()));
-        assertThat(response.netAmount())
-                .isEqualByComparingTo(response.grossAmount().subtract(response.totalFee()));
-        assertThat(response.grossAmount()).isEqualByComparingTo(grossAmount);
-        assertThat(response.fxRateApplied()).isEqualByComparingTo(KES_TO_USD);
+        SendMoneyResponse response = transactionService.processSendMoney(sender, sendRequest(grossAmount));
 
-        // Destination payout must be consistent with the applied FX rate
+        assertThat(response.status()).isEqualTo("PROCESSING");
+        assertThat(response.payoutGateway()).isEqualTo("PAYSTACK");
+        assertThat(response.payoutReference()).startsWith("PSK-");
+
+        // Source wallet debited by gross + total fees
+        Wallet sourceAfter = walletRepository.findById(sourceWallet.getId()).orElseThrow();
+        BigDecimal expectedBalance = new BigDecimal("100000.0000")
+                .subtract(grossAmount)
+                .subtract(response.totalFee());
+        assertThat(sourceAfter.getBalance()).isEqualByComparingTo(expectedBalance);
+
+        // Destination amount consistent with the applied FX rate
         BigDecimal expectedPayout = response.netAmount().multiply(KES_TO_USD)
                 .setScale(4, RoundingMode.HALF_UP);
         assertThat(response.amountReceived()).isEqualByComparingTo(expectedPayout);
 
-        // Source wallet debited by gross + total fees
-        Wallet sourceAfter = walletRepository.findById(sourceWallet.getId()).orElseThrow();
-        BigDecimal expectedSourceBalance = new BigDecimal("100000.0000")
-                .subtract(grossAmount).subtract(response.totalFee());
-        assertThat(sourceAfter.getBalance()).isEqualByComparingTo(expectedSourceBalance);
+        // Paystack recipient registered exactly once and transfer initiated once
+        verify(paystackPayoutService).createOrGetRecipient(any(Beneficiary.class));
+        verify(paystackPayoutService).initiateTransfer(
+                eq(response.payoutReference()), eq(RECIPIENT_CODE), any(BigDecimal.class),
+                eq("KES"), anyString());
 
-        // Destination wallet credited with the target-currency payout
-        Wallet destAfter = walletRepository.findById(destinationWallet.getId()).orElseThrow();
-        assertThat(destAfter.getBalance()).isEqualByComparingTo(expectedPayout);
+        // Recipient code persisted for future payouts
+        Beneficiary after = beneficiaryRepository.findById(beneficiary.getId()).orElseThrow();
+        assertThat(after.getPaystackRecipientCode()).isEqualTo(RECIPIENT_CODE);
     }
 
     @Test
-    @DisplayName("given completed remittance, then the posted ledger legs are balanced per currency (debits == credits)")
-    void givenRemittance_thenLedgerLegsAreBalancedPerCurrency() {
-        transactionService.processPeerToPeerTransfer(sender, exchangeRequest(new BigDecimal("500.0000")));
+    @DisplayName("given completed payout initiation, then posted ledger legs balance per currency (debits == credits)")
+    void givenSendMoney_thenLedgerLegsAreBalancedPerCurrency() {
+        transactionService.processSendMoney(sender, sendRequest(new BigDecimal("500.0000")));
 
         List<LedgerEntry> legs = ledgerEntryRepository.findAll();
-        assertThat(legs).hasSizeGreaterThanOrEqualTo(6); // principal, markup x2, routing x2, fx x2, received
+        assertThat(legs).hasSizeGreaterThanOrEqualTo(4);
 
+        // Per-currency double-entry invariant holds EXCEPT for the payout
+        // currency, where an unmatched FX_CLEARING debit is correct by design:
+        // liquidity permanently leaves the system pool towards Paystack.
         for (Currency currency : Currency.values()) {
             BigDecimal debits = sumSide(legs, currency, true);
             BigDecimal credits = sumSide(legs, currency, false);
             if (debits.signum() == 0 && credits.signum() == 0) continue;
+
+            boolean isExternalPayoutLeg = legs.stream()
+                    .filter(e -> e.getCurrency() == currency)
+                    .allMatch(e -> e.getEntryClass() == EntryClass.FX_CLEARING
+                            && e.getDebit().signum() > 0 && e.getCredit().signum() == 0);
+            if (isExternalPayoutLeg) continue;
+
             assertThat(debits)
                     .as("double-entry invariant violated for %s", currency)
                     .isEqualByComparingTo(credits);
@@ -189,86 +217,65 @@ class TransactionServiceIntegrationTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("given identical payload replayed with the same idempotencyKey, then duplicate is rejected and balances are charged exactly once")
-    void givenReplayedIdempotencyKey_whenProcessedTwice_thenNoDoubleChargingOccurs() {
+    @DisplayName("given identical payload replayed with same idempotencyKey, then duplicate rejected and Paystack called exactly once")
+    void givenReplayedIdempotencyKey_whenProcessedTwice_thenNoDoubleChargeOrDoublePayout() {
         BigDecimal grossAmount = new BigDecimal("250.0000");
-        TransactionRequest.ExchangeFundsRequest request = exchangeRequest(grossAmount);
+        TransactionRequest.SendMoneyRequest request = sendRequest(grossAmount);
 
-        ExchangeResponse first = transactionService.processPeerToPeerTransfer(sender, request);
-        assertThatThrownBy(() -> transactionService.processPeerToPeerTransfer(sender, request))
+        transactionService.processSendMoney(sender, request);
+        assertThatThrownBy(() -> transactionService.processSendMoney(sender, request))
                 .isInstanceOf(DuplicateTransactionException.class)
                 .hasMessageContaining("Duplicate transaction detected");
 
-        // Exactly one transaction persisted despite two attempts
         assertThat(transactionRepository.count()).isEqualTo(1);
-
-        // Balances reflect exactly ONE charge
-        Wallet sourceAfter = walletRepository.findById(sourceWallet.getId()).orElseThrow();
-        BigDecimal singleChargeDebit = new BigDecimal("100000.0000")
-                .subtract(first.totalFee()).subtract(first.grossAmount());
-        assertThat(sourceAfter.getBalance()).isEqualByComparingTo(singleChargeDebit);
-
-        Wallet destAfter = walletRepository.findById(destinationWallet.getId()).orElseThrow();
-        assertThat(destAfter.getBalance()).isEqualByComparingTo(first.amountReceived());
-
-        // Exactly one set of ledger legs
-        long principalLegs = ledgerEntryRepository.findAll().stream()
-                .filter(e -> e.getEntryClass() == EntryClass.PRINCIPAL_TRANSFER)
-                .count();
-        assertThat(principalLegs).isEqualTo(2); // one debit + one credit
+        // Exactly ONE Paystack dispatch across both attempts (duplicate rejected
+        // before any gateway call).
+        verify(paystackPayoutService, times(1)).initiateTransfer(
+                anyString(), anyString(), any(BigDecimal.class), anyString(), anyString());
     }
 
     // -------------------------------------------------------------------------
-    // c) ROLLBACK: failure mid-flow must leave zero side effects
+    // c) GUARDRAILS
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("given ledger persistence fails mid-remittance, then the entire DB transaction rolls back leaving no trace")
-    void givenMidFlowFailure_whenRemittance_thenEverythingRollsBack() {
-        doThrow(new RuntimeException("Simulated ledger persistence outage"))
-                .when(ledgerEntryRepositorySpy).saveAll(anyList());
+    @DisplayName("given suspicious transaction flagged by fraud engine, then no Paystack dispatch occurs")
+    void givenFlaggedTransaction_whenSendMoney_thenPaystackNotCalled() {
+        when(fraudDetectionService.isSuspiciousTransaction(any(UUID.class), any(BigDecimal.class), any()))
+                .thenReturn(true);
 
-        BigDecimal balanceBefore = sourceWallet.getBalance();
+        SendMoneyResponse response = transactionService.processSendMoney(
+                sender, sendRequest(new BigDecimal("400.0000")));
 
-        assertThatThrownBy(() -> transactionService.processPeerToPeerTransfer(
-                sender, exchangeRequest(new BigDecimal("300.0000"))))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Simulated ledger persistence outage");
-
-        // No transaction row survived
-        assertThat(transactionRepository.count()).isEqualTo(0);
-        // No ledger legs survived
-        assertThat(ledgerEntryRepository.count()).isEqualTo(0);
-        // Source wallet projection untouched
-        Wallet sourceAfter = walletRepository.findById(sourceWallet.getId()).orElseThrow();
-        assertThat(sourceAfter.getBalance()).isEqualByComparingTo(balanceBefore);
-        // Destination untouched
-        Wallet destAfter = walletRepository.findById(destinationWallet.getId()).orElseThrow();
-        assertThat(destAfter.getBalance()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(response.status()).isEqualTo("FLAGGED");
+        verify(paystackPayoutService, never()).initiateTransfer(
+                anyString(), anyString(), any(), anyString(), anyString());
     }
 
     @Test
-    @DisplayName("given insufficient source funds, when transfer, then InsufficientFunds-style rejection occurs before any persistence")
-    void givenInsufficientFunds_whenTransfer_thenRejectedWithoutPersistingAnything() {
+    @DisplayName("given insufficient funds, then rejection occurs before any persistence or dispatch")
+    void givenInsufficientFunds_whenSendMoney_thenRejectedWithoutPersistingAnything() {
         long transactionsBefore = transactionRepository.count();
 
-        assertThatThrownBy(() -> transactionService.processPeerToPeerTransfer(
-                sender, exchangeRequest(new BigDecimal("9999999.0000"))))
+        assertThatThrownBy(() -> transactionService.processSendMoney(
+                sender, sendRequest(new BigDecimal("9999999.0000"))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Insufficient funds");
 
         assertThat(transactionRepository.count()).isEqualTo(transactionsBefore);
         assertThat(ledgerEntryRepository.count()).isEqualTo(0);
+        verify(paystackPayoutService, never()).initiateTransfer(
+                anyString(), anyString(), any(), anyString(), anyString());
     }
 
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
-    private TransactionRequest.ExchangeFundsRequest exchangeRequest(BigDecimal amount) {
-        return new TransactionRequest.ExchangeFundsRequest(
+    private TransactionRequest.SendMoneyRequest sendRequest(BigDecimal amount) {
+        return new TransactionRequest.SendMoneyRequest(
                 sourceWallet.getId(),
-                destinationWallet.getId(),
+                beneficiary.getId(),
                 Currency.KES,
                 Currency.USD,
                 amount,

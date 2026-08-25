@@ -2,14 +2,12 @@ package com.manuelorg.cross_pesa.wallet.controller;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.payment.service.FlutterwaveService;
-import com.manuelorg.cross_pesa.wallet.dto.CreateWalletRequest;
 import com.manuelorg.cross_pesa.wallet.dto.TopUpRequest;
 import com.manuelorg.cross_pesa.wallet.dto.WalletResponse;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.service.WalletService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -36,19 +34,6 @@ public class WalletController {
     ) {
         WalletResponse wallet = walletService.getUserWallet(currentUser.getId());
         return ResponseEntity.ok(wallet);
-    }
-
-    /**
-     * POST /api/v1/wallets
-     * Creates a new primary retail wallet for the currently logged-in user.
-     */
-    @PostMapping
-    public ResponseEntity<WalletResponse> createWallet(
-            @AuthenticationPrincipal User currentUser,
-            @Valid @RequestBody CreateWalletRequest request
-    ) {
-        WalletResponse response = walletService.createWallet(currentUser, request.currency());
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /**

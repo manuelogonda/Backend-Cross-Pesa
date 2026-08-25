@@ -8,7 +8,7 @@ import java.util.UUID;
 public class TransactionResponse {
 
     /**
-     * Response DTO for external remittances.
+     * Response DTO for external remittances (Paystack beneficiary payouts).
      */
     public record SendMoneyResponse(
             UUID id,
@@ -26,6 +26,8 @@ public class TransactionResponse {
             BigDecimal fxRateApplied,
             BigDecimal usdNormalizationRate,
             String reference,
+            String payoutGateway,
+            String payoutReference,
             String status,
             OffsetDateTime createdAt
     ) {
@@ -49,53 +51,8 @@ public class TransactionResponse {
                     tx.getFxRateApplied(),
                     tx.getUsdNormalizationRate(),
                     resolvedRef,
-                    tx.getStatus().name(),
-                    tx.getCreatedAt()
-            );
-        }
-    }
-
-    /**
-     * Response DTO for P2P / Wallet-to-Wallet transfers.
-     */
-    public record ExchangeResponse(
-            UUID id,
-            UUID senderId,
-            UUID sourceWalletId,
-            UUID destinationWalletId,
-            String sourceCurrency,
-            String destinationCurrency,
-            BigDecimal grossAmount,
-            BigDecimal netAmount,
-            BigDecimal markupFee,
-            BigDecimal routingFee,
-            BigDecimal totalFee,
-            BigDecimal amountReceived,
-            BigDecimal fxRateApplied,
-            BigDecimal usdNormalizationRate,
-            String reference,
-            String status,
-            OffsetDateTime createdAt
-    ) {
-        public static ExchangeResponse fromEntity(Transaction tx) {
-            String resolvedRef = tx.getGatewayReference() != null ? tx.getGatewayReference() : "P2P-INTERNAL";
-
-            return new ExchangeResponse(
-                    tx.getId(),
-                    tx.getSender().getId(),
-                    tx.getSourceWallet().getId(),
-                    tx.getDestinationWallet() != null ? tx.getDestinationWallet().getId() : null,
-                    tx.getSourceCurrency().name(),
-                    tx.getDestinationCurrency().name(),
-                    tx.getGrossAmount(),
-                    tx.getNetAmount(),
-                    tx.getMarkupFee(),
-                    tx.getRoutingFee(),
-                    tx.getTotalFee(),
-                    tx.getDestinationAmount(),
-                    tx.getFxRateApplied(),
-                    tx.getUsdNormalizationRate(),
-                    resolvedRef,
+                    tx.getPayoutGateway(),
+                    tx.getPayoutReference(),
                     tx.getStatus().name(),
                     tx.getCreatedAt()
             );

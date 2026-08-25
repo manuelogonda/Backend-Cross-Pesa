@@ -28,6 +28,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     Optional<Transaction> findByGatewayReference(String gatewayReference);
 
+    Optional<Transaction> findByPayoutReference(String payoutReference);
+
     // --- FRAUD ENGINE ---
 
     /**

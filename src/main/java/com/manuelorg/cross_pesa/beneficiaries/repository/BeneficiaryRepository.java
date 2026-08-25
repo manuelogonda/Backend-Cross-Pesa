@@ -5,6 +5,9 @@ import com.manuelorg.cross_pesa.beneficiaries.entity.PayoutProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -24,4 +27,12 @@ public interface BeneficiaryRepository extends JpaRepository<Beneficiary, UUID> 
             PayoutProvider payoutProvider,
             String accountNumber
     );
+
+    /**
+     * Persists the cached Paystack transfer recipient code. Must be called
+     * within an active transaction (see TransactionService payout hook).
+     */
+    @Modifying
+    @Query("update Beneficiary b set b.paystackRecipientCode = :code where b.id = :id")
+    int updatePaystackRecipientCode(@Param("id") UUID id, @Param("code") String code);
 }

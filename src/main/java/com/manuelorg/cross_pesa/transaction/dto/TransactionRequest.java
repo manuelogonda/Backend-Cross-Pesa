@@ -35,27 +35,7 @@ public class TransactionRequest {
         ) {}
 
         /**
-         * Request DTO for Peer-to-Peer (P2P) transfers.
-         * Moves funds directly between user wallets across currencies using the pricing engine.
+         * REMOVED: ExchangeFundsRequest (P2P) was deprecated along with P2P transfers.
+         * Outbound flows use {@link SendMoneyRequest} against a saved beneficiary.
          */
-        public record ExchangeFundsRequest(
-                @NotNull(message = "Source wallet ID is required")
-                UUID sourceWalletId,
-
-                @NotNull(message = "Destination wallet ID is required")
-                UUID destinationWalletId,
-
-                @NotNull(message = "Source currency is required")
-                Currency sourceCurrency,
-
-                @NotNull(message = "Destination currency is required")
-                Currency destinationCurrency,
-
-                @NotNull(message = "Amount is required")
-                @Positive(message = "Exchange amount must be strictly greater than zero")
-                BigDecimal amount,
-
-                @NotNull(message = "Idempotency key is required")
-                UUID idempotencyKey
-        ) {}
 }

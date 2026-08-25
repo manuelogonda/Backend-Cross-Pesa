@@ -40,17 +40,11 @@ public class TransactionController {
     }
 
     /**
-     * POST /api/v1/transactions/p2p
-     * Executes an internal transfer between user wallets across currencies.
+     * POST /api/v1/transactions/p2p — REMOVED.
+     * P2P wallet-to-wallet transfers are deprecated; outbound funds now flow
+     * exclusively through the saved-beneficiary Paystack payout workflow
+     * (POST /api/v1/transactions/send).
      */
-    @PostMapping("/p2p")
-    public ResponseEntity<TransactionResponse.ExchangeResponse> peerToPeerTransfer(
-            @AuthenticationPrincipal User currentUser,
-            @Valid @RequestBody TransactionRequest.ExchangeFundsRequest request
-    ) {
-        TransactionResponse.ExchangeResponse response = transactionService.processPeerToPeerTransfer(currentUser, request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
-    }
 
     /**
      * GET /api/v1/transactions

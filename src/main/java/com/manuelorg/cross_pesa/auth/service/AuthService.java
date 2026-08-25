@@ -27,6 +27,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
     private final WalletService walletService;
+    private final com.manuelorg.cross_pesa.wallet.service.CountryCurrencyResolver countryCurrencyResolver;
     private final org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
 
 
@@ -53,8 +54,12 @@ public class AuthService {
 
         User savedUser = repository.save(user);
 
-        // Provision the requested default-currency retail wallet (defaults to KES).
-        walletService.createWallet(savedUser, request.currency() != null ? request.currency() : Currency.KES);
+        // Auto-provision the user's primary native wallet (0.00 balance) in the
+        // same atomic transaction: explicit currency > country auto-detection > default.
+        Currency nativeCurrency = request.currency() != null
+                ? request.currency()
+                : countryCurrencyResolver.resolve(request.country(), request.phoneNumber());
+        walletService.createWallet(savedUser, nativeCurrency);
 
         return buildAuthResponse(savedUser);
     }

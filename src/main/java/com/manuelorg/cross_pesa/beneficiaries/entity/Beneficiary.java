@@ -75,6 +75,14 @@ public class Beneficiary {
     @Column(name = "account_currency", nullable = false, length = 3)
     private Currency accountCurrency = Currency.KES;
 
+    /**
+     * Paystack transfer recipient code (RCP_xxx) created for this beneficiary.
+     * Cached so the recipient is registered once with Paystack and reused for
+     * every payout — never persisted in logs.
+     */
+    @Column(name = "paystack_recipient_code", length = 100)
+    private String paystackRecipientCode;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private OffsetDateTime createdAt;

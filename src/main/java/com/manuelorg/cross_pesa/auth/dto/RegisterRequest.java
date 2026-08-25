@@ -28,5 +28,8 @@ public record RegisterRequest(
         )
         String password,
 
-        Currency currency
+        Currency currency,
+
+        @Size(max = 2, message = "Country must be a 2-letter ISO 3166 alpha-2 code")
+        String country
 ) {}

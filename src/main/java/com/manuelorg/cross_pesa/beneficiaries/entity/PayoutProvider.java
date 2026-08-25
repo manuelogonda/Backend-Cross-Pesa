@@ -9,7 +9,8 @@ public enum PayoutProvider {
     MPESA("M-PESA"),
     EQUITY_BANK("EQUITY BANK"),
     VISA("VISA"),
-    MASTERCARD("MASTERCARD");
+    MASTERCARD("MASTERCARD"),
+    PAYSTACK("PAYSTACK");
 
     private final String dbValue;
 }
