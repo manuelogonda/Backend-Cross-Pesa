@@ -2,6 +2,8 @@ package com.manuelorg.cross_pesa.wallet.service;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.ledger.service.LedgerService;
+import com.manuelorg.cross_pesa.notification.dto.TriggerNotificationEvent;
+import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
 import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
@@ -13,8 +15,11 @@ import com.manuelorg.cross_pesa.wallet.enums.WalletType;
 import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -27,6 +32,7 @@ public class WalletService {
     private final WalletRepository walletRepository;
     private final TransactionRepository transactionRepository;
     private final LedgerService ledgerService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Fetches the primary retail wallet belonging to a user.
@@ -130,6 +136,35 @@ public class WalletService {
 
         // 8. Re-fetch to return the updated balance projection
         Wallet updatedWallet = walletRepository.findById(wallet.getId()).orElseThrow();
+
+        // 9. Fire the user notification AFTER commit so a listener failure can
+        //    never roll back the credited wallet.
+        UUID topUpTransactionId = savedTransaction.getId();
+        String amountCredited = amount + " " + currency;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    eventPublisher.publishEvent(new TriggerNotificationEvent(
+                            userId,
+                            topUpTransactionId,
+                            "Wallet Top-Up Successful",
+                            "Your wallet has been credited with " + amountCredited + ".",
+                            NotificationType.IN_APP,
+                            java.util.Map.of(
+                                    "transactionId", topUpTransactionId.toString(),
+                                    "reference", reference
+                            )
+                    ));
+                } catch (Exception e) {
+                    log.atError()
+                            .addKeyValue("event", "notification.publish_failed")
+                            .addKeyValue("transactionId", topUpTransactionId)
+                            .log("Failed to publish top-up notification event", e);
+                }
+            }
+        });
+
         log.atInfo()
                 .addKeyValue("event", "wallet.credited")
                 .addKeyValue("walletId", updatedWallet.getId())

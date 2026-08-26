@@ -56,13 +56,16 @@ class WalletServiceTest {
     @Mock
     private LedgerService ledgerService;
 
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
     private WalletService walletService;
 
     private User user;
 
     @BeforeEach
     void setUp() {
-        walletService = new WalletService(walletRepository, transactionRepository, ledgerService);
+        walletService = new WalletService(walletRepository, transactionRepository, ledgerService, eventPublisher);
         user = User.builder()
                 .id(UUID.randomUUID())
                 .firstName("Emmanuel")

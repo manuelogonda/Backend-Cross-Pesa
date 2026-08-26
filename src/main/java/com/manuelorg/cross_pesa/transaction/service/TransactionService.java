@@ -4,6 +4,8 @@ import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.beneficiaries.entity.Beneficiary;
 import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
 import com.manuelorg.cross_pesa.exception.DuplicateTransactionException;
+import com.manuelorg.cross_pesa.notification.dto.TriggerNotificationEvent;
+import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import com.manuelorg.cross_pesa.ledger.entity.LedgerEntry;
 import com.manuelorg.cross_pesa.ledger.repository.LedgerEntryRepository;
 import com.manuelorg.cross_pesa.payment.flutterwave.FlutterwaveTransferService;
@@ -22,6 +24,7 @@ import com.manuelorg.cross_pesa.wallet.repository.WalletRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -46,6 +49,7 @@ public class TransactionService {
     private final SystemWalletEngine systemWalletEngine;
     private final LedgerEntryRepository ledgerEntryRepository;
     private final FlutterwaveTransferService flutterwaveTransferService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * 1. PROCESS SEND MONEY (External Remittance to Bank/Mobile Money)
@@ -159,6 +163,19 @@ public class TransactionService {
                     .log("Transaction flagged for manual review — Flutterwave payout NOT initiated");
         }
 
+        // 9b. Fire the user notification AFTER commit so a listener failure can
+        //     never roll back the settled transaction.
+        UUID senderId = currentUser.getId();
+        UUID transactionId = savedTransaction.getId();
+        String amountSent = quote.amountSent() + " " + request.sourceCurrency();
+        TransactionStatus status = finalStatus;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                publishTransactionNotification(senderId, transactionId, amountSent, status);
+            }
+        });
+
         log.atInfo()
                 .addKeyValue("event", "remittance.initiated")
                 .addKeyValue("transactionId", savedTransaction.getId())
@@ -169,6 +186,28 @@ public class TransactionService {
                 .log("Cross-border remittance initiated");
 
         return SendMoneyResponse.fromEntity(savedTransaction);
+    }
+
+    private void publishTransactionNotification(
+            UUID senderId, UUID transactionId, String amountSent, TransactionStatus status) {
+        try {
+            boolean flagged = status == TransactionStatus.FLAGGED;
+            eventPublisher.publishEvent(new TriggerNotificationEvent(
+                    senderId,
+                    transactionId,
+                    flagged ? "Transaction Flagged for Review" : "Transfer Initiated",
+                    flagged
+                            ? "Your transfer of " + amountSent + " has been flagged for manual review."
+                            : "Your transfer of " + amountSent + " to your beneficiary is being processed.",
+                    NotificationType.IN_APP,
+                    java.util.Map.of("transactionId", transactionId.toString(), "status", status.name())
+            ));
+        } catch (Exception e) {
+            log.atError()
+                    .addKeyValue("event", "notification.publish_failed")
+                    .addKeyValue("transactionId", transactionId)
+                    .log("Failed to publish transaction notification event", e);
+        }
     }
 
     /**
