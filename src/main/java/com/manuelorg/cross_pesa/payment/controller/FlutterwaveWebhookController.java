@@ -70,10 +70,12 @@ public class FlutterwaveWebhookController {
 
             switch (event) {
                 case "charge.completed" -> webhookService.processChargeEvent(payload);
-                case "transfer.completed" ->
-                        webhookService.processTransferEvent(payload.data().reference(), true, traceId);
-                case "transfer.failed", "transfer.reversed" ->
-                        webhookService.processTransferEvent(payload.data().reference(), false, traceId);
+                case "transfer.completed", "transfer.failed", "transfer.reversed" ->
+                        // The event name alone is NOT authoritative: Flutterwave fires
+                        // transfer.completed even when data.status is FAILED or REVERSED
+                        // (destination bank / mobile-money switch rejected after queueing).
+                        // Success is decided strictly by data.status inside the service.
+                        webhookService.processTransferEvent(payload.data().reference(), payload.data().status(), traceId);
                 default -> log.atInfo()
                         .addKeyValue("event", "flutterwave.webhook.unhandled")
                         .addKeyValue("flutterwaveEvent", event)

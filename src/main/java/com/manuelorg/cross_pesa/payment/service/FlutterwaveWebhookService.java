@@ -148,11 +148,15 @@ public class FlutterwaveWebhookService {
      * means replayed events are no-ops; the REFUND entry-class uniqueness check
      * inside {@code executePayoutReversal} prevents double reversals under a race.
      *
+     * @param providerStatus raw gateway status string from the webhook data
+     *                      (SUCCESSFUL / FAILED / REVERSED / PENDING / NEW);
+     *                      only SUCCESSFUL confirms a payout, anything else
+     *                      triggers the compensating ledger reversal
      * @param traceId inbound MDC trace id propagated from the controller thread,
      *                since the webhook thread may differ from the request thread
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void processTransferEvent(String payoutReference, boolean successful, String traceId) {
+    public void processTransferEvent(String payoutReference, String providerStatus, String traceId) {
         if (traceId != null) {
             MDC.put("traceId", traceId);
         }
@@ -178,10 +182,17 @@ public class FlutterwaveWebhookService {
                 return;
             }
 
+            boolean successful = "successful".equalsIgnoreCase(
+                    providerStatus == null ? "" : providerStatus.trim());
             if (successful) {
                 confirmPayout(tx);
             } else {
-                reversePayout(tx);
+                log.atWarn()
+                        .addKeyValue("event", "flutterwave.webhook.negative_status")
+                        .addKeyValue("transactionId", tx.getId())
+                        .addKeyValue("providerStatus", providerStatus)
+                        .log("Non-successful Flutterway transfer status — triggering reversal");
+                reversePayout(tx, providerStatus);
             }
         } finally {
             MDC.remove("traceId");
@@ -200,10 +211,11 @@ public class FlutterwaveWebhookService {
     }
 
     /** transfer.failed / reversed: compensating ledger reversal refunds the user. */
-    private void reversePayout(Transaction tx) {
+    private void reversePayout(Transaction tx, String providerStatus) {
         log.atWarn()
                 .addKeyValue("event", "payout.reversal.triggered")
                 .addKeyValue("transactionId", tx.getId())
+                .addKeyValue("providerStatus", providerStatus)
                 .log("Reversing settlement and refunding user wallet");
 
         systemWalletEngine.executePayoutReversal(
