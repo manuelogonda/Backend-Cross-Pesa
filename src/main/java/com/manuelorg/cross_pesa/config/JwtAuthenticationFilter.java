@@ -15,10 +15,18 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private static final Set<String> PUBLIC_AUTH_PATHS = Set.of(
+            "/api/v1/auth/login",
+            "/api/v1/auth/register",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/oauth2/exchange"
+    );
 
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
@@ -35,10 +43,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         final String userEmail;
 
         // Skip JWT validation for public authentication endpoints.
-        // startsWith (never contains) — a substring match would let crafted
-        // paths slip past token processing.
         String path = request.getServletPath();
-        if (path.startsWith("/api/v1/auth/")) {
+        if (PUBLIC_AUTH_PATHS.contains(path)) {
             filterChain.doFilter(request, response);
             return;
         }
