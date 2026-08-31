@@ -11,6 +11,7 @@ import com.manuelorg.cross_pesa.auth.entity.KycStatus;
 import com.manuelorg.cross_pesa.auth.entity.Role;
 import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.auth.entity.UserStatus;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpService;
 import com.manuelorg.cross_pesa.wallet.dto.WalletResponse;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.enums.WalletStatus;
@@ -50,6 +51,9 @@ class AdminControllersTest {
 
     @Mock
     private AdminUserOpsService adminUserOpsService;
+
+    @Mock
+    private StepUpService stepUpService;
 
     @InjectMocks
     private AdminController adminController;
@@ -143,7 +147,8 @@ class AdminControllersTest {
                 "Rebalancing liquidity"
         );
 
-        ResponseEntity<AdminMessageResponse> response = adminTreasuryController.rebalancePools(adminUser, request);
+        doNothing().when(stepUpService).requireStepUp(any(), any(), anyString(), any());
+        ResponseEntity<AdminMessageResponse> response = adminTreasuryController.rebalancePools(adminUser, "stepup-token", request);
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
         assertEquals("Treasury rebalance executed and logged successfully.", response.getBody().message());

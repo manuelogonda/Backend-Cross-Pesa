@@ -1,6 +1,8 @@
 package com.manuelorg.cross_pesa.exception;
 
 import com.manuelorg.cross_pesa.exception.dto.ErrorResponse;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpRequiredException;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpVerificationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -57,6 +59,30 @@ class GlobalExceptionHandlerTest {
         assertThat(lockedResponse.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(ReflectionTestUtils.getField(disabledResponse.getBody(), "message")).isEqualTo("Authentication failed");
         assertThat(ReflectionTestUtils.getField(lockedResponse.getBody(), "message")).isEqualTo("Authentication failed");
+    }
+
+    @Test
+    void handleStepUpRequired_returnsPreconditionRequired() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/transactions/send");
+        var response = handler.handleStepUpRequired(new StepUpRequiredException("Step-up verification required"), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PRECONDITION_REQUIRED);
+        ErrorResponse body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(ReflectionTestUtils.getField(body, "message"))
+                .isEqualTo("Step-up verification required");
+    }
+
+    @Test
+    void handleStepUpVerification_returnsForbidden() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/transactions/send");
+        var response = handler.handleStepUpVerification(new StepUpVerificationException("Step-up verification failed"), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        ErrorResponse body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(ReflectionTestUtils.getField(body, "message"))
+                .isEqualTo("Step-up verification failed");
     }
 
     @Test

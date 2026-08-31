@@ -2,6 +2,9 @@ package com.manuelorg.cross_pesa.transaction.controller;
 
 
 import com.manuelorg.cross_pesa.auth.entity.User;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpAction;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpContextFactory;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpService;
 import com.manuelorg.cross_pesa.transaction.dto.TransactionRequest;
 import com.manuelorg.cross_pesa.transaction.dto.TransactionResponse;
 import com.manuelorg.cross_pesa.transaction.service.TransactionService;
@@ -25,6 +28,7 @@ import java.util.UUID;
 public class TransactionController {
 
     private final TransactionService transactionService;
+    private final StepUpService stepUpService;
 
     /**
      * POST /api/v1/transactions/send
@@ -33,8 +37,15 @@ public class TransactionController {
     @PostMapping("/send")
     public ResponseEntity<TransactionResponse.SendMoneyResponse> sendMoney(
             @AuthenticationPrincipal User currentUser,
+            @RequestHeader(name = StepUpService.STEP_UP_TOKEN_HEADER, required = false) String stepUpToken,
             @Valid @RequestBody TransactionRequest.SendMoneyRequest request
     ) {
+        stepUpService.requireStepUp(
+                currentUser,
+                StepUpAction.TRANSACTION_SEND,
+                StepUpContextFactory.forTransactionSend(request),
+                stepUpToken
+        );
         TransactionResponse.SendMoneyResponse response = transactionService.processSendMoney(currentUser, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }

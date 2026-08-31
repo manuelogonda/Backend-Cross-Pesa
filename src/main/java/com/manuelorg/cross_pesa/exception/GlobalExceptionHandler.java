@@ -1,6 +1,8 @@
 package com.manuelorg.cross_pesa.exception;
 
 import com.manuelorg.cross_pesa.exception.dto.ErrorResponse;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpRequiredException;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpVerificationException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -53,6 +55,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleDisabledOrLocked(RuntimeException ex, HttpServletRequest request) {
         log.warn("Rejected account-state authentication request at {}: {}", request.getRequestURI(), ex.getMessage());
         return buildErrorResponse("Authentication failed", HttpStatus.UNAUTHORIZED, request, null);
+    }
+
+    @ExceptionHandler(StepUpRequiredException.class)
+    public ResponseEntity<ErrorResponse> handleStepUpRequired(StepUpRequiredException ex, HttpServletRequest request) {
+        log.warn("Rejected sensitive write without step-up at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildErrorResponse("Step-up verification required", HttpStatus.PRECONDITION_REQUIRED, request, null);
+    }
+
+    @ExceptionHandler(StepUpVerificationException.class)
+    public ResponseEntity<ErrorResponse> handleStepUpVerification(StepUpVerificationException ex, HttpServletRequest request) {
+        log.warn("Rejected sensitive write with invalid step-up at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildErrorResponse("Step-up verification failed", HttpStatus.FORBIDDEN, request, null);
     }
 
     // 4b. Handle duplicate idempotency keys (409 Conflict)

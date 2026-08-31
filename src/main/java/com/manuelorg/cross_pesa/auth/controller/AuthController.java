@@ -5,7 +5,13 @@ import com.manuelorg.cross_pesa.auth.dto.LoginRequest;
 import com.manuelorg.cross_pesa.auth.dto.OAuth2CodeExchangeRequest;
 import com.manuelorg.cross_pesa.auth.dto.RefreshTokenRequest;
 import com.manuelorg.cross_pesa.auth.dto.RegisterRequest;
+import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.auth.security.LoginRateLimiterService;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpChallengeRequest;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpChallengeResponse;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpService;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpVerifyRequest;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpVerifyResponse;
 import com.manuelorg.cross_pesa.auth.service.AuthService;
 import com.manuelorg.cross_pesa.auth.service.OAuth2LoginCodeService;
 import com.manuelorg.cross_pesa.auth.repository.UserRepository;
@@ -17,6 +23,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,6 +37,7 @@ import java.util.Map;
 public class AuthController {
 
     private final AuthService service;
+    private final StepUpService stepUpService;
     private final LoginRateLimiterService rateLimiterService;
     private final OAuth2LoginCodeService oauth2LoginCodeService;
     private final UserRepository userRepository;
@@ -41,6 +49,24 @@ public class AuthController {
     ) {
         // We use HTTP 201 (CREATED) to explicitly tell the frontend a new resource was made
         return new ResponseEntity<>(service.register(request), HttpStatus.CREATED);
+    }
+
+    @PostMapping("/step-up/challenge")
+    public ResponseEntity<StepUpChallengeResponse> requestStepUpChallenge(
+            @AuthenticationPrincipal User currentUser,
+            @Valid @RequestBody StepUpChallengeRequest request
+    ) {
+        requireAuthenticatedUser(currentUser);
+        return ResponseEntity.ok(stepUpService.issueChallenge(currentUser, request.action(), request.context()));
+    }
+
+    @PostMapping("/step-up/verify")
+    public ResponseEntity<StepUpVerifyResponse> verifyStepUpChallenge(
+            @AuthenticationPrincipal User currentUser,
+            @Valid @RequestBody StepUpVerifyRequest request
+    ) {
+        requireAuthenticatedUser(currentUser);
+        return ResponseEntity.ok(stepUpService.verifyChallenge(currentUser, request));
     }
 
     @PostMapping("/refresh")
@@ -107,5 +133,11 @@ public class AuthController {
     private ResponseEntity<Map<String, String>> authenticationFailure() {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(Map.of("error", "Authentication failed."));
+    }
+
+    private void requireAuthenticatedUser(User currentUser) {
+        if (currentUser == null) {
+            throw new BadCredentialsException("Authentication failed.");
+        }
     }
 }

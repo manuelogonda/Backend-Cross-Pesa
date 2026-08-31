@@ -1,6 +1,9 @@
 package com.manuelorg.cross_pesa.beneficiaries.controller;
 
 import com.manuelorg.cross_pesa.auth.entity.User;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpAction;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpContextFactory;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpService;
 import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryRequest;
 import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryResponse;
 import com.manuelorg.cross_pesa.beneficiaries.service.BeneficiaryService;
@@ -22,6 +25,7 @@ import java.util.UUID;
 public class BeneficiaryController {
 
     private final BeneficiaryService beneficiaryService;
+    private final StepUpService stepUpService;
 
     /**
      * GET /api/v1/beneficiaries
@@ -43,8 +47,15 @@ public class BeneficiaryController {
     @PostMapping
     public ResponseEntity<BeneficiaryResponse> addBeneficiary(
             @AuthenticationPrincipal User currentUser,
+            @RequestHeader(name = StepUpService.STEP_UP_TOKEN_HEADER, required = false) String stepUpToken,
             @Valid @RequestBody BeneficiaryRequest request
     ) {
+        stepUpService.requireStepUp(
+                currentUser,
+                StepUpAction.BENEFICIARY_CREATE,
+                StepUpContextFactory.forBeneficiaryCreate(request),
+                stepUpToken
+        );
         BeneficiaryResponse response = beneficiaryService.createBeneficiary(currentUser, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
@@ -56,8 +67,15 @@ public class BeneficiaryController {
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> removeBeneficiary(
             @AuthenticationPrincipal User currentUser,
+            @RequestHeader(name = StepUpService.STEP_UP_TOKEN_HEADER, required = false) String stepUpToken,
             @PathVariable UUID id
     ) {
+        stepUpService.requireStepUp(
+                currentUser,
+                StepUpAction.BENEFICIARY_DELETE,
+                StepUpContextFactory.forBeneficiaryDelete(id),
+                stepUpToken
+        );
         beneficiaryService.deleteBeneficiary(currentUser, id);
         return ResponseEntity.noContent().build(); // 204 No Content
     }
@@ -70,8 +88,15 @@ public class BeneficiaryController {
     public ResponseEntity<BeneficiaryResponse> updateBeneficiary(
             @AuthenticationPrincipal User currentUser,
             @PathVariable UUID id,
+            @RequestHeader(name = StepUpService.STEP_UP_TOKEN_HEADER, required = false) String stepUpToken,
             @Valid @RequestBody BeneficiaryRequest request
     ) {
+        stepUpService.requireStepUp(
+                currentUser,
+                StepUpAction.BENEFICIARY_UPDATE,
+                StepUpContextFactory.forBeneficiaryUpdate(id, request),
+                stepUpToken
+        );
         BeneficiaryResponse response = beneficiaryService.updateBeneficiary(currentUser, id, request);
         return ResponseEntity.ok(response);
     }

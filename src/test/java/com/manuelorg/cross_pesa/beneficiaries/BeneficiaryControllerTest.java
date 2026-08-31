@@ -2,6 +2,7 @@ package com.manuelorg.cross_pesa.beneficiaries;
 
 import com.manuelorg.cross_pesa.auth.entity.Role;
 import com.manuelorg.cross_pesa.auth.entity.User;
+import com.manuelorg.cross_pesa.auth.stepup.StepUpService;
 import com.manuelorg.cross_pesa.beneficiaries.controller.BeneficiaryController;
 import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryRequest;
 import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryResponse;
@@ -31,12 +32,17 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 
 @ExtendWith(MockitoExtension.class)
 class BeneficiaryControllerTest {
 
     @Mock
     private BeneficiaryService beneficiaryService;
+
+    @Mock
+    private StepUpService stepUpService;
 
     @InjectMocks
     private BeneficiaryController beneficiaryController;
@@ -73,6 +79,8 @@ class BeneficiaryControllerTest {
                 "MPESA",
                 "KES"
         );
+
+        lenient().doNothing().when(stepUpService).requireStepUp(any(), any(), anyString(), any());
     }
 
     @Test
@@ -108,7 +116,7 @@ class BeneficiaryControllerTest {
 
         when(beneficiaryService.createBeneficiary(currentUser, request)).thenReturn(sampleResponse);
 
-        ResponseEntity<BeneficiaryResponse> response = beneficiaryController.addBeneficiary(currentUser, request);
+        ResponseEntity<BeneficiaryResponse> response = beneficiaryController.addBeneficiary(currentUser, "stepup-token", request);
 
         assertEquals(HttpStatus.CREATED, response.getStatusCode());
         assertNotNull(response.getBody());
@@ -120,7 +128,7 @@ class BeneficiaryControllerTest {
     void removeBeneficiary_ReturnsNoContent() {
         UUID id = UUID.randomUUID();
 
-        ResponseEntity<Void> response = beneficiaryController.removeBeneficiary(currentUser, id);
+        ResponseEntity<Void> response = beneficiaryController.removeBeneficiary(currentUser, "stepup-token", id);
 
         assertEquals(HttpStatus.NO_CONTENT, response.getStatusCode());
         assertNull(response.getBody());
@@ -147,7 +155,7 @@ class BeneficiaryControllerTest {
 
         when(beneficiaryService.updateBeneficiary(currentUser, id, request)).thenReturn(sampleResponse);
 
-        ResponseEntity<BeneficiaryResponse> response = beneficiaryController.updateBeneficiary(currentUser, id, request);
+        ResponseEntity<BeneficiaryResponse> response = beneficiaryController.updateBeneficiary(currentUser, id, "stepup-token", request);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
