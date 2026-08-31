@@ -1,0 +1,13 @@
+spring:
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+  web:
+    error:
+      include-message: always
+
+server:
+  error:
+    include-message: always
+    include-stacktrace: always

@@ -2,6 +2,7 @@ package com.manuelorg.cross_pesa.exception;
 
 import com.manuelorg.cross_pesa.exception.dto.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -15,26 +16,28 @@ import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     // 1. Handle Missing Resources (404 Not Found)
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex, HttpServletRequest request) {
-        return buildErrorResponse(ex.getMessage(), HttpStatus.NOT_FOUND, request, null);
+        return buildErrorResponse("Resource not found", HttpStatus.NOT_FOUND, request, null);
     }
 
     // 2. Handle Bad Business Logic / Invalid States (400 Bad Request)
     @ExceptionHandler({BadRequestException.class, IllegalArgumentException.class})
     public ResponseEntity<ErrorResponse> handleBadRequest(RuntimeException ex, HttpServletRequest request) {
-        return buildErrorResponse(ex.getMessage(), HttpStatus.BAD_REQUEST, request, null);
+        log.warn("Rejected bad request at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildErrorResponse("Invalid request", HttpStatus.BAD_REQUEST, request, null);
     }
 
     // 3. Handle Financial Logic Constraints (422 Unprocessable Entity)
     @ExceptionHandler(InsufficientBalanceException.class)
     public ResponseEntity<ErrorResponse> handleInsufficientBalance(InsufficientBalanceException ex, HttpServletRequest request) {
-        // Use the updated Spring 7 enum: UNPROCESSABLE_CONTENT
-        return buildErrorResponse(ex.getMessage(), HttpStatus.UNPROCESSABLE_CONTENT, request, null);
+        log.warn("Rejected insufficient balance request at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildErrorResponse("Insufficient balance", HttpStatus.UNPROCESSABLE_CONTENT, request, null);
     }
 
     // 4. Handle Incorrect Passwords from Spring Security (401 Unauthorized)
@@ -46,7 +49,8 @@ public class GlobalExceptionHandler {
     // 4b. Handle duplicate idempotency keys (409 Conflict)
     @ExceptionHandler(DuplicateTransactionException.class)
     public ResponseEntity<ErrorResponse> handleDuplicateTransaction(DuplicateTransactionException ex, HttpServletRequest request) {
-        return buildErrorResponse(ex.getMessage(), HttpStatus.CONFLICT, request, null);
+        log.info("Duplicate transaction request at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildErrorResponse("Duplicate transaction request", HttpStatus.CONFLICT, request, null);
     }
 
     // 5. Handle DTO @Valid Failures (e.g., weak password, invalid email format)
@@ -65,8 +69,7 @@ public class GlobalExceptionHandler {
     // 6. The Ultimate Catch-All for unexpected server crashes (500 Internal Server Error)
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGlobalException(Exception ex, HttpServletRequest request) {
-        // Log the actual exception to your console for debugging, but hide it from the user
-        ex.printStackTrace();
+        log.error("Unhandled exception at {}: {}", request.getRequestURI(), ex.getMessage(), ex);
         return buildErrorResponse("An unexpected internal server error occurred", HttpStatus.INTERNAL_SERVER_ERROR, request, null);
     }
 

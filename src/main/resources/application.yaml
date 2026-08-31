@@ -3,6 +3,9 @@ server:
   # Honour X-Forwarded-* headers from the reverse proxy / load balancer so
   # rate limiting keys on the real client IP instead of the proxy IP.
   forward-headers-strategy: framework
+  error:
+    include-message: never
+    include-stacktrace: never
 
 spring:
   application:
@@ -48,9 +51,9 @@ spring:
 
   # 4. JPA Configuration
   jpa:
-    show-sql: true
+    show-sql: false
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
@@ -66,7 +69,7 @@ spring:
 
   web:
     error:
-      include-message: always
+      include-message: never
 
   docker:
     compose:
@@ -121,7 +124,7 @@ flutterwave:
   redirect-url: http://localhost:5173/wallet/verify-topup
   webhook-secret: ${FLW_WEBHOOK_SECRET}
   # Public URL of the unified Flutterwave webhook; sent as callback_url on transfers.
-  transfer-webhook-url: ${FLW_TRANSFER_WEBHOOK_URL:}
+  transfer-webhook-url: ${FLW_WEBHOOK_URL}
 
 # Inbound webhook secrets. If unset, the corresponding webhooks reject all traffic.
 webhook:
