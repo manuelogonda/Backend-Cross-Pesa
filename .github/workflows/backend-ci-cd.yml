@@ -1,5 +1,12 @@
 name: Backend CI/CD
 
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main, staging]
@@ -41,10 +48,26 @@ jobs:
     steps:
       - name: Trigger Render Staging Deploy
         if: github.ref == 'refs/heads/staging'
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}
         run: |
-          curl -fsS -X POST "${{ secrets.RENDER_STAGING_DEPLOY_HOOK }}"
+          set -euo pipefail
+          if [ -z "${RENDER_DEPLOY_HOOK:-}" ]; then
+            echo "Missing RENDER_STAGING_DEPLOY_HOOK secret"
+            exit 1
+          fi
+          echo "Triggering staging deploy"
+          curl --fail --silent --show-error --max-time 30 -X POST "${RENDER_DEPLOY_HOOK}"
 
       - name: Trigger Render Production Deploy
         if: github.ref == 'refs/heads/main'
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
         run: |
-          curl -fsS -X POST "${{ secrets.RENDER_PROD_DEPLOY_HOOK }}"
+          set -euo pipefail
+          if [ -z "${RENDER_DEPLOY_HOOK:-}" ]; then
+            echo "Missing RENDER_PROD_DEPLOY_HOOK secret"
+            exit 1
+          fi
+          echo "Triggering production deploy"
+          curl --fail --silent --show-error --max-time 30 -X POST "${RENDER_DEPLOY_HOOK}"
