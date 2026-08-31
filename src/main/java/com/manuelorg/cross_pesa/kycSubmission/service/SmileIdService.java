@@ -5,12 +5,16 @@ import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.auth.repository.UserRepository;
 import com.manuelorg.cross_pesa.kycSubmission.entity.KycSubmission;
 import com.manuelorg.cross_pesa.kycSubmission.repository.KycSubmissionRepository;
+import com.manuelorg.cross_pesa.notification.dto.TriggerNotificationEvent;
+import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -20,6 +24,7 @@ public class SmileIdService {
     private final KycSubmissionRepository kycRepository;
     private final UserRepository userRepository;
     private final CloudinaryService cloudinaryService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public void processWebhook(Map<String, Object> payload) {
@@ -94,6 +99,9 @@ public class SmileIdService {
                     user.setKycLevel(2);
                     userRepository.save(user);
                     log.info("Auto-approved KYC for user: {}", user.getEmail());
+                    publishKycNotification(user.getId(), submission.getId(), "KYC Auto-Approved",
+                            "Your KYC has been automatically approved via biometric verification. You now have Level 2 access.",
+                            NotificationType.IN_APP);
                 }
 
             } else if ("Rejected".equalsIgnoreCase(resultText)) {
@@ -101,10 +109,24 @@ public class SmileIdService {
                 submission.setStatus("REJECTED");
                 submission.setRejectionReason("Automated biometric rejection by Smile ID.");
                 log.info("Auto-rejected KYC for Job: {}", jobId);
+
+                User user = submission.getUser();
+                if (user != null) {
+                    publishKycNotification(user.getId(), submission.getId(), "KYC Rejected",
+                            "Your KYC submission was rejected due to biometric verification failure.",
+                            NotificationType.IN_APP);
+                }
             } else {
                 // For edge cases (e.g., blurry images), leave it as PENDING for the Admin Dashboard to review
                 submission.setRejectionReason("Requires manual admin review. Smile ID Status: " + resultText);
                 log.info("Job {} requires manual admin review.", jobId);
+
+                User user = submission.getUser();
+                if (user != null) {
+                    publishKycNotification(user.getId(), submission.getId(), "KYC Requires Review",
+                            "Your KYC submission requires manual review. Our team will contact you shortly.",
+                            NotificationType.IN_APP);
+                }
             }
 
             // 6. Save the final state to PostgreSQL
@@ -112,6 +134,21 @@ public class SmileIdService {
 
         } catch (Exception e) {
             log.error("Failed to process Smile ID Webhook", e);
+        }
+    }
+
+    private void publishKycNotification(UUID userId, UUID submissionId, String title, String message, NotificationType type) {
+        try {
+            eventPublisher.publishEvent(new TriggerNotificationEvent(
+                    userId,
+                    submissionId,
+                    title,
+                    message,
+                    type,
+                    java.util.Map.of("submissionId", submissionId.toString())
+            ));
+        } catch (Exception e) {
+            log.error("Failed to publish KYC notification for submission {}", submissionId, e);
         }
     }
 }

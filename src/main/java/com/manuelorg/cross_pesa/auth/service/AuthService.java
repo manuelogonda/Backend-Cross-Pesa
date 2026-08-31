@@ -28,7 +28,7 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final WalletService walletService;
     private final com.manuelorg.cross_pesa.wallet.service.CountryCurrencyResolver countryCurrencyResolver;
-    private final org.springframework.security.core.userdetails.UserDetailsService userDetailsService;
+    private final RefreshTokenService refreshTokenService;
 
 
     @Transactional
@@ -85,35 +85,19 @@ public class AuthService {
      * accounts cannot mint new tokens.
      */
     public AuthResponse refresh(String refreshToken) {
-        String email;
-        try {
-            email = jwtService.extractUsername(refreshToken);
-        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException e) {
-            throw new org.springframework.security.authentication.BadCredentialsException("Invalid refresh token");
-        }
+        RefreshTokenService.RotationResult rotationResult = refreshTokenService.rotateRefreshToken(refreshToken);
+        var user = rotationResult.user();
 
-        if (!"refresh".equals(jwtService.extractTokenType(refreshToken))) {
-            throw new org.springframework.security.authentication.BadCredentialsException("Invalid refresh token");
-        }
-
-        var userDetails = userDetailsService.loadUserByUsername(email);
-        if (!jwtService.isTokenValid(refreshToken, userDetails)) {
-            throw new org.springframework.security.authentication.BadCredentialsException("Invalid or expired refresh token");
-        }
-
-        var user = repository.findByEmail(email)
-                .orElseThrow(() -> new org.springframework.security.authentication.BadCredentialsException("User no longer exists"));
-
-        if (user.getStatus() != null && user.getStatus() != com.manuelorg.cross_pesa.auth.entity.UserStatus.ACTIVE) {
-            throw new org.springframework.security.authentication.DisabledException("Account is not active");
-        }
-
-        return buildAuthResponse(user);
+        return buildAuthResponse(user, rotationResult.refreshToken());
     }
 
     private AuthResponse buildAuthResponse(User user) {
+        String refreshToken = refreshTokenService.issueRefreshToken(user);
+        return buildAuthResponse(user, refreshToken);
+    }
+
+    private AuthResponse buildAuthResponse(User user, String refreshToken) {
         var accessToken = jwtService.generateAccessToken(user);
-        var refreshToken = jwtService.generateRefreshToken(user);
 
         return AuthResponse.builder()
                 .accessToken(accessToken)
@@ -121,5 +105,18 @@ public class AuthService {
                 .role(user.getRole().name())
                 .firstName(user.getFirstName())
                 .build();
+    }
+
+    public AuthResponse issueTokens(User user) {
+        return buildAuthResponse(user);
+    }
+
+    public AuthResponse issueTokens(User user, String refreshToken) {
+        return buildAuthResponse(user, refreshToken);
+    }
+
+    @Transactional
+    public void logout(String refreshToken) {
+        refreshTokenService.revokeRefreshToken(refreshToken);
     }
 }

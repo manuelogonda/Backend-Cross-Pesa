@@ -1,6 +1,7 @@
 package com.manuelorg.cross_pesa.config;
 
 import com.manuelorg.cross_pesa.auth.repository.UserRepository;
+import com.manuelorg.cross_pesa.auth.service.OAuth2LoginCodeService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -18,8 +19,8 @@ import java.io.IOException;
 @RequiredArgsConstructor
 public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
 
-    private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final OAuth2LoginCodeService oauth2LoginCodeService;
 
     /** Frontend base URL the browser is redirected to after OAuth2 login. */
     @Value("${app.oauth2.redirect-base-url:http://localhost:5173}")
@@ -34,15 +35,11 @@ public class OAuth2SuccessHandler extends SimpleUrlAuthenticationSuccessHandler 
         var user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("User not synced correctly after OAuth authentication"));
 
-        String accessToken = jwtService.generateAccessToken(user);
-        String refreshToken = jwtService.generateRefreshToken(user);
+        String code = oauth2LoginCodeService.issueCode(user);
 
-        // Tokens go in the URL FRAGMENT (#), not the query string (?):
-        // fragments are never sent to servers, so they stay out of access
-        // logs and proxy logs.
         String targetUrl = UriComponentsBuilder.fromUriString(redirectBaseUrl)
                 .path("/oauth2/redirect")
-                .fragment("token=" + accessToken + "&refresh_token=" + refreshToken)
+                .queryParam("code", code)
                 .build().toUriString();
 
         getRedirectStrategy().sendRedirect(request, response, targetUrl);

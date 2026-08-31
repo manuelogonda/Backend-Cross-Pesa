@@ -2,10 +2,13 @@ package com.manuelorg.cross_pesa.auth.controller;
 
 import com.manuelorg.cross_pesa.auth.dto.AuthResponse;
 import com.manuelorg.cross_pesa.auth.dto.LoginRequest;
+import com.manuelorg.cross_pesa.auth.dto.OAuth2CodeExchangeRequest;
 import com.manuelorg.cross_pesa.auth.dto.RefreshTokenRequest;
 import com.manuelorg.cross_pesa.auth.dto.RegisterRequest;
 import com.manuelorg.cross_pesa.auth.security.LoginRateLimiterService;
 import com.manuelorg.cross_pesa.auth.service.AuthService;
+import com.manuelorg.cross_pesa.auth.service.OAuth2LoginCodeService;
+import com.manuelorg.cross_pesa.auth.repository.UserRepository;
 import com.manuelorg.cross_pesa.exception.RateLimitExceededException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -29,6 +32,8 @@ public class AuthController {
 
     private final AuthService service;
     private final LoginRateLimiterService rateLimiterService;
+    private final OAuth2LoginCodeService oauth2LoginCodeService;
+    private final UserRepository userRepository;
 
 
     @PostMapping("/register")
@@ -52,6 +57,29 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Invalid or expired refresh token."));
         }
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(
+            @Valid @RequestBody RefreshTokenRequest request
+    ) {
+        service.logout(request.refreshToken());
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/oauth2/exchange")
+    public ResponseEntity<AuthResponse> exchangeOAuth2Code(
+            @Valid @RequestBody OAuth2CodeExchangeRequest request
+    ) {
+        String email = oauth2LoginCodeService.consumeCode(request.code());
+        if (email == null) {
+            throw new BadCredentialsException("Invalid or expired OAuth2 login code.");
+        }
+
+        var user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BadCredentialsException("Invalid or expired OAuth2 login code."));
+
+        return ResponseEntity.ok(service.issueTokens(user));
     }
 
 
