@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.LockedException;
@@ -42,6 +43,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleInsufficientBalance(InsufficientBalanceException ex, HttpServletRequest request) {
         log.warn("Rejected insufficient balance request at {}: {}", request.getRequestURI(), ex.getMessage());
         return buildErrorResponse("Insufficient balance", HttpStatus.UNPROCESSABLE_CONTENT, request, null);
+    }
+
+    @ExceptionHandler(BeneficiaryInUseException.class)
+    public ResponseEntity<ErrorResponse> handleBeneficiaryInUse(BeneficiaryInUseException ex, HttpServletRequest request) {
+        log.warn("Rejected beneficiary delete at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildErrorResponse(ex.getMessage(), HttpStatus.CONFLICT, request, null);
     }
 
     // 4. Handle Incorrect Passwords from Spring Security (401 Unauthorized)
@@ -92,6 +99,15 @@ public class GlobalExceptionHandler {
     // 6. The Ultimate Catch-All for unexpected server crashes (500 Internal Server Error)
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGlobalException(Exception ex, HttpServletRequest request) {
+        if (ex instanceof DataIntegrityViolationException) {
+            log.warn("Rejected request due to persistence constraint at {}: {}", request.getRequestURI(), ex.getMessage());
+            return buildErrorResponse(
+                    "This beneficiary has transaction history and cannot be deleted.",
+                    HttpStatus.CONFLICT,
+                    request,
+                    null
+            );
+        }
         log.error("Unhandled exception at {}: {}", request.getRequestURI(), ex.getMessage(), ex);
         return buildErrorResponse("An unexpected internal server error occurred", HttpStatus.INTERNAL_SERVER_ERROR, request, null);
     }

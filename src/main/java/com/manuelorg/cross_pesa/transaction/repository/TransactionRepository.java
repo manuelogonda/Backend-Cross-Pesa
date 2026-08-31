@@ -50,6 +50,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, UUID> 
 
     Page<Transaction> findBySenderId(UUID senderId, Pageable pageable);
 
+    boolean existsByBeneficiaryId(UUID beneficiaryId);
+
     // --- GLOBAL ADMIN PAGINATION ---
 
     Page<Transaction> findAll(Pageable pageable);

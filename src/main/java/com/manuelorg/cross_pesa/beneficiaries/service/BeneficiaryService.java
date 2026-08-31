@@ -5,10 +5,13 @@ import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryRequest;
 import com.manuelorg.cross_pesa.beneficiaries.dto.BeneficiaryResponse;
 import com.manuelorg.cross_pesa.beneficiaries.entity.Beneficiary;
 import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
+import com.manuelorg.cross_pesa.exception.BeneficiaryInUseException;
 import com.manuelorg.cross_pesa.payment.flutterwave.FlutterwaveTransferService;
+import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +22,7 @@ import java.util.UUID;
 public class BeneficiaryService {
 
     private final BeneficiaryRepository beneficiaryRepository;
+    private final TransactionRepository transactionRepository;
     private final FlutterwaveTransferService flutterwaveTransferService;
 
     @Transactional(readOnly = true)
@@ -61,7 +65,19 @@ public class BeneficiaryService {
         Beneficiary beneficiary = beneficiaryRepository.findByIdAndUserId(beneficiaryId, currentUser.getId())
                 .orElseThrow(() -> new IllegalArgumentException("Beneficiary not found or unauthorized"));
 
-        beneficiaryRepository.delete(beneficiary);
+        if (transactionRepository.existsByBeneficiaryId(beneficiaryId)) {
+            throw new BeneficiaryInUseException(
+                    "This beneficiary has transaction history and cannot be deleted."
+            );
+        }
+
+        try {
+            beneficiaryRepository.delete(beneficiary);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BeneficiaryInUseException(
+                    "This beneficiary has transaction history and cannot be deleted."
+            );
+        }
     }
 
     @Transactional
