@@ -6,6 +6,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -31,6 +34,29 @@ class GlobalExceptionHandlerTest {
         ErrorResponse body = response.getBody();
         assertThat(body).isNotNull();
         assertThat(ReflectionTestUtils.getField(body, "message")).isEqualTo("Invalid request");
+    }
+
+    @Test
+    void handleBadCredentials_returnsGenericAuthMessage() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+        var response = handler.handleBadCredentials(new BadCredentialsException("User no longer exists"), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        ErrorResponse body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(ReflectionTestUtils.getField(body, "message")).isEqualTo("Authentication failed");
+    }
+
+    @Test
+    void handleDisabledOrLocked_returnsGenericAuthMessage() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+        var disabledResponse = handler.handleDisabledOrLocked(new DisabledException("Account is not active"), request);
+        var lockedResponse = handler.handleDisabledOrLocked(new LockedException("Account is locked"), request);
+
+        assertThat(disabledResponse.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(lockedResponse.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(ReflectionTestUtils.getField(disabledResponse.getBody(), "message")).isEqualTo("Authentication failed");
+        assertThat(ReflectionTestUtils.getField(lockedResponse.getBody(), "message")).isEqualTo("Authentication failed");
     }
 
     @Test

@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -43,7 +45,14 @@ public class GlobalExceptionHandler {
     // 4. Handle Incorrect Passwords from Spring Security (401 Unauthorized)
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<ErrorResponse> handleBadCredentials(BadCredentialsException ex, HttpServletRequest request) {
-        return buildErrorResponse("Invalid email or password", HttpStatus.UNAUTHORIZED, request, null);
+        log.warn("Rejected authentication request at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildErrorResponse("Authentication failed", HttpStatus.UNAUTHORIZED, request, null);
+    }
+
+    @ExceptionHandler({DisabledException.class, LockedException.class})
+    public ResponseEntity<ErrorResponse> handleDisabledOrLocked(RuntimeException ex, HttpServletRequest request) {
+        log.warn("Rejected account-state authentication request at {}: {}", request.getRequestURI(), ex.getMessage());
+        return buildErrorResponse("Authentication failed", HttpStatus.UNAUTHORIZED, request, null);
     }
 
     // 4b. Handle duplicate idempotency keys (409 Conflict)

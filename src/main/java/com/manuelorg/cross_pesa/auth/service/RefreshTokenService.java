@@ -41,23 +41,23 @@ public class RefreshTokenService {
         ParsedRefreshToken parsed = parseAndHash(rawRefreshToken);
 
         RefreshToken stored = refreshTokenRepository.findByTokenHashForUpdate(parsed.tokenHash())
-                .orElseThrow(() -> new BadCredentialsException("Invalid refresh token"));
+                .orElseThrow(() -> new BadCredentialsException("Authentication failed"));
 
         User currentUser = userRepository.findById(stored.getUser().getId())
-                .orElseThrow(() -> new BadCredentialsException("User no longer exists"));
+                .orElseThrow(() -> new BadCredentialsException("Authentication failed"));
 
         if (!currentUser.getEmail().equalsIgnoreCase(parsed.subject())) {
-            throw new BadCredentialsException("Invalid refresh token");
+            throw new BadCredentialsException("Authentication failed");
         }
 
         if (currentUser.getStatus() != null && currentUser.getStatus() != UserStatus.ACTIVE) {
             revokeToken(stored);
             refreshTokenRepository.revokeAllActiveByUserId(currentUser.getId(), OffsetDateTime.now());
-            throw new DisabledException("Account is not active");
+            throw new DisabledException("Authentication failed");
         }
 
         if (stored.isRevoked() || stored.getExpiresAt().isBefore(OffsetDateTime.now())) {
-            throw new BadCredentialsException("Invalid or expired refresh token");
+            throw new BadCredentialsException("Authentication failed");
         }
 
         revokeToken(stored);
@@ -101,13 +101,13 @@ public class RefreshTokenService {
 
     private ParsedRefreshToken parseAndHash(String rawRefreshToken) {
         if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
-            throw new BadCredentialsException("Invalid refresh token");
+            throw new BadCredentialsException("Authentication failed");
         }
 
         try {
             String subject = jwtService.extractUsername(rawRefreshToken);
             if (!"refresh".equals(jwtService.extractTokenType(rawRefreshToken))) {
-                throw new BadCredentialsException("Invalid refresh token");
+                throw new BadCredentialsException("Authentication failed");
             }
             String tokenHash = sha256Hex(rawRefreshToken);
             String jti = jwtService.extractClaim(rawRefreshToken, claims -> claims.get("jti", String.class));
@@ -117,7 +117,7 @@ public class RefreshTokenService {
             );
             return new ParsedRefreshToken(subject, tokenHash, jti, expiresAt);
         } catch (JwtException | IllegalArgumentException e) {
-            throw new BadCredentialsException("Invalid refresh token");
+            throw new BadCredentialsException("Authentication failed");
         }
     }
 

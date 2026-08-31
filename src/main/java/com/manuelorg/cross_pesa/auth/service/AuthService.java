@@ -13,11 +13,14 @@ import org.springframework.transaction.annotation.Transactional;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import com.manuelorg.cross_pesa.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -35,10 +38,12 @@ public class AuthService {
     public AuthResponse register(RegisterRequest request) {
         // RECORD syntax: request.email()
         if (repository.existsByEmail(request.email())) {
-            throw new IllegalArgumentException("Email is already registered");
+            log.warn("Rejected registration for existing email {}", request.email());
+            throw new IllegalArgumentException("Registration failed");
         }
         if (repository.existsByPhoneNumber(request.phoneNumber())) {
-            throw new IllegalArgumentException("Phone number is already registered");
+            log.warn("Rejected registration for existing phone number {}", request.phoneNumber());
+            throw new IllegalArgumentException("Registration failed");
         }
 
         var user = User.builder()
@@ -74,7 +79,10 @@ public class AuthService {
         );
 
         var user = repository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+                .orElseThrow(() -> {
+                    log.warn("Authenticated principal missing from repository for email {}", request.getEmail());
+                    return new BadCredentialsException("Authentication failed");
+                });
 
         return buildAuthResponse(user);
     }

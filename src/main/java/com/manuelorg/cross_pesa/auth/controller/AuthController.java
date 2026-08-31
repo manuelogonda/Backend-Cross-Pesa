@@ -16,8 +16,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.authentication.DisabledException;
-import org.springframework.security.authentication.LockedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -50,12 +49,8 @@ public class AuthController {
     ) {
         try {
             return ResponseEntity.ok(service.refresh(request.refreshToken()));
-        } catch (DisabledException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Your account is currently suspended. Please contact support."));
-        } catch (BadCredentialsException e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid or expired refresh token."));
+        } catch (AuthenticationException e) {
+            return authenticationFailure();
         }
     }
 
@@ -68,18 +63,22 @@ public class AuthController {
     }
 
     @PostMapping("/oauth2/exchange")
-    public ResponseEntity<AuthResponse> exchangeOAuth2Code(
+    public ResponseEntity<?> exchangeOAuth2Code(
             @Valid @RequestBody OAuth2CodeExchangeRequest request
     ) {
-        String email = oauth2LoginCodeService.consumeCode(request.code());
-        if (email == null) {
-            throw new BadCredentialsException("Invalid or expired OAuth2 login code.");
+        try {
+            String email = oauth2LoginCodeService.consumeCode(request.code());
+            if (email == null) {
+                throw new BadCredentialsException("Authentication failed.");
+            }
+
+            var user = userRepository.findByEmail(email)
+                    .orElseThrow(() -> new BadCredentialsException("Authentication failed."));
+
+            return ResponseEntity.ok(service.issueTokens(user));
+        } catch (AuthenticationException e) {
+            return authenticationFailure();
         }
-
-        var user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new BadCredentialsException("Invalid or expired OAuth2 login code."));
-
-        return ResponseEntity.ok(service.issueTokens(user));
     }
 
 
@@ -100,15 +99,13 @@ public class AuthController {
         try {
             // HTTP 200 (OK) is standard for a successful login
             return ResponseEntity.ok(service.login(request));
-        } catch (org.springframework.security.authentication.DisabledException e) {
-            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN)
-                    .body(java.util.Map.of("error", "Your account is currently suspended. Please contact support."));
-        } catch (org.springframework.security.authentication.LockedException e) {
-            return ResponseEntity.status(org.springframework.http.HttpStatus.FORBIDDEN)
-                    .body(java.util.Map.of("error", "Your account is locked."));
-        } catch (org.springframework.security.authentication.BadCredentialsException e) {
-            return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED)
-                    .body(java.util.Map.of("error", "Invalid email or password."));
+        } catch (AuthenticationException e) {
+            return authenticationFailure();
         }
+    }
+
+    private ResponseEntity<Map<String, String>> authenticationFailure() {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("error", "Authentication failed."));
     }
 }
