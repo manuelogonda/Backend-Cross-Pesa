@@ -7,6 +7,7 @@ import com.manuelorg.cross_pesa.auth.dto.RefreshTokenRequest;
 import com.manuelorg.cross_pesa.auth.dto.RegisterRequest;
 import com.manuelorg.cross_pesa.auth.entity.User;
 import com.manuelorg.cross_pesa.auth.security.LoginRateLimiterService;
+import com.manuelorg.cross_pesa.auth.stepup.PasswordConfirmationRequest;
 import com.manuelorg.cross_pesa.auth.stepup.StepUpChallengeRequest;
 import com.manuelorg.cross_pesa.auth.stepup.StepUpChallengeResponse;
 import com.manuelorg.cross_pesa.auth.stepup.StepUpService;
@@ -67,6 +68,22 @@ public class AuthController {
     ) {
         requireAuthenticatedUser(currentUser);
         return ResponseEntity.ok(stepUpService.verifyChallenge(currentUser, request));
+    }
+
+    @PostMapping("/password-confirmation")
+    public ResponseEntity<StepUpVerifyResponse> confirmPassword(
+            @AuthenticationPrincipal User currentUser,
+            @Valid @RequestBody PasswordConfirmationRequest request
+    ) {
+        requireAuthenticatedUser(currentUser);
+        return ResponseEntity.ok(
+                stepUpService.issueTokenAfterPasswordConfirmation(
+                        currentUser,
+                        request.action(),
+                        request.context(),
+                        request.password()
+                )
+        );
     }
 
     @PostMapping("/refresh")

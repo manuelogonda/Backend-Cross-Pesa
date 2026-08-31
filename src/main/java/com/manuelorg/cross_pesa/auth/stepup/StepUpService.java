@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
 import org.redisson.api.RRateLimiter;
 import org.redisson.api.RedissonClient;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -91,14 +92,21 @@ public class StepUpService {
         }
 
         deleteChallenge(request.challengeId());
+        return issueToken(user, challenge.action(), challenge.context(), "Verified step-up challenge");
+    }
 
-        String rawToken = generateToken();
-        OffsetDateTime tokenExpiresAt = OffsetDateTime.now(ZoneOffset.UTC).plus(TOKEN_TTL);
-        StoredToken token = new StoredToken(user.getId(), challenge.action(), challenge.context(), tokenExpiresAt.toString());
-        writeToken(rawToken, token);
+    public StepUpVerifyResponse issueTokenAfterPasswordConfirmation(User user, StepUpAction action, String context, String rawPassword) {
+        validateUserAndPayload(user, action, context);
 
-        log.info("Verified step-up challenge for user {} action {} tokenIssued", user.getId(), challenge.action());
-        return new StepUpVerifyResponse(rawToken, tokenExpiresAt);
+        if (user.getPassword() == null || rawPassword == null || rawPassword.isBlank()) {
+            throw new BadCredentialsException("Authentication failed");
+        }
+
+        if (!passwordEncoder.matches(rawPassword, user.getPassword())) {
+            throw new BadCredentialsException("Authentication failed");
+        }
+
+        return issueToken(user, action, context, "Password confirmation accepted");
     }
 
     public void requireStepUp(User user, StepUpAction action, String context, String rawToken) {
@@ -119,6 +127,16 @@ public class StepUpService {
         }
 
         deleteToken(rawToken);
+    }
+
+    private StepUpVerifyResponse issueToken(User user, StepUpAction action, String context, String logMessage) {
+        String rawToken = generateToken();
+        OffsetDateTime tokenExpiresAt = OffsetDateTime.now(ZoneOffset.UTC).plus(TOKEN_TTL);
+        StoredToken token = new StoredToken(user.getId(), action, context, tokenExpiresAt.toString());
+        writeToken(rawToken, token);
+
+        log.info("{} for user {} action {} tokenIssued", logMessage, user.getId(), action);
+        return new StepUpVerifyResponse(rawToken, tokenExpiresAt);
     }
 
     private void rateLimitChallengeRequests(UUID userId, StepUpAction action) {
