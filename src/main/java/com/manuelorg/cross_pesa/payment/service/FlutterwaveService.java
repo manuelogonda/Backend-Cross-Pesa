@@ -111,7 +111,7 @@ public class FlutterwaveService {
      * Flutterwave sends the raw webhook secret as the {@code verif-hash} header value.
      */
     public boolean isValidWebhookSignature(String verifHash) {
-        if (verifHash == null || verifHash.isBlank()) {
+        if (verifHash == null || verifHash.isBlank() || webhookSecret == null || webhookSecret.isBlank()) {
             return false;
         }
         return java.security.MessageDigest.isEqual(
