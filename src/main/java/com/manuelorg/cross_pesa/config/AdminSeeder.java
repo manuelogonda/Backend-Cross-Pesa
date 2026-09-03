@@ -27,13 +27,18 @@ public class AdminSeeder implements CommandLineRunner {
     @Value("${app.admin.email}")
     private String adminEmail;
 
-    @Value("${app.admin.password}")
+    @Value("${app.admin.password:}")
     private String adminPassword;
 
     @Override
     @Transactional
     public void run(String... args) {
         if (!userRepository.existsByEmail(adminEmail)) {
+            if (adminPassword == null || adminPassword.isBlank()) {
+                log.warn("Admin password is not configured. Skipping initial System Admin seeding for {}", adminEmail);
+                return;
+            }
+
             log.info("🚀 Seeding initial System Admin: {}", adminEmail);
 
             User admin = User.builder()

@@ -142,7 +142,7 @@ app:
     address: ${REDIS_ADDRESS}
   admin:
     email: ${ADMIN_EMAIL:admin@crosspesa.com}
-    password: ${ADMIN_PASSWORD}
+    password: ${ADMIN_PASSWORD:}
   oauth2:
     redirect-base-url: ${OAUTH2_REDIRECT_BASE_URL:http://localhost:5173}
 
