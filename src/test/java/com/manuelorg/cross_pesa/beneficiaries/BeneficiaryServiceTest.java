@@ -9,6 +9,8 @@ import com.manuelorg.cross_pesa.beneficiaries.entity.PayoutMethod;
 import com.manuelorg.cross_pesa.beneficiaries.entity.PayoutProvider;
 import com.manuelorg.cross_pesa.beneficiaries.repository.BeneficiaryRepository;
 import com.manuelorg.cross_pesa.beneficiaries.service.BeneficiaryService;
+import com.manuelorg.cross_pesa.exception.BeneficiaryInUseException;
+import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
 import com.manuelorg.cross_pesa.wallet.enums.Currency;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +42,9 @@ class BeneficiaryServiceTest {
 
     @Mock
     private com.manuelorg.cross_pesa.payment.flutterwave.FlutterwaveTransferService flutterwaveTransferService;
+
+    @Mock
+    private TransactionRepository transactionRepository;
 
     @InjectMocks
     private BeneficiaryService beneficiaryService;
@@ -168,10 +173,24 @@ class BeneficiaryServiceTest {
     void deleteBeneficiary_Success() {
         when(beneficiaryRepository.findByIdAndUserId(beneficiaryId, currentUser.getId()))
                 .thenReturn(Optional.of(beneficiary));
+        when(transactionRepository.existsByBeneficiaryId(beneficiaryId)).thenReturn(false);
 
         beneficiaryService.deleteBeneficiary(currentUser, beneficiaryId);
 
         verify(beneficiaryRepository).delete(beneficiary);
+    }
+
+    @Test
+    void deleteBeneficiary_InUse_ThrowsConflict() {
+        when(beneficiaryRepository.findByIdAndUserId(beneficiaryId, currentUser.getId()))
+                .thenReturn(Optional.of(beneficiary));
+        when(transactionRepository.existsByBeneficiaryId(beneficiaryId)).thenReturn(true);
+
+        BeneficiaryInUseException ex = assertThrows(BeneficiaryInUseException.class,
+                () -> beneficiaryService.deleteBeneficiary(currentUser, beneficiaryId));
+
+        assertTrue(ex.getMessage().contains("cannot be deleted"));
+        verify(beneficiaryRepository, never()).delete(any());
     }
 
     @Test

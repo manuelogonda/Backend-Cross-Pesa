@@ -132,6 +132,47 @@ class NotificationServiceTest {
     }
 
     @Test
+    void handleNotificationEvent_SameTransactionDifferentPayloads_SavesDistinctNotifications() {
+        Map<UUID, Notification> seenKeys = new java.util.HashMap<>();
+        when(notificationRepository.findByIdempotencyKey(any(UUID.class)))
+                .thenAnswer(invocation -> {
+                    UUID key = invocation.getArgument(0);
+                    return Optional.ofNullable(seenKeys.get(key));
+                });
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(transactionRepository.findById(transactionId)).thenReturn(Optional.of(transaction));
+        when(notificationRepository.save(any(Notification.class))).thenAnswer(invocation -> {
+            Notification n = invocation.getArgument(0);
+            n.setId(UUID.randomUUID());
+            seenKeys.put(n.getIdempotencyKey(), n);
+            return n;
+        });
+
+        TriggerNotificationEvent first = new TriggerNotificationEvent(
+                userId,
+                transactionId,
+                "Transfer Initiated",
+                "Your transfer of $100 is being processed",
+                NotificationType.IN_APP,
+                Map.of()
+        );
+
+        TriggerNotificationEvent second = new TriggerNotificationEvent(
+                userId,
+                transactionId,
+                "Transfer Completed",
+                "Your transfer of $100 has been completed",
+                NotificationType.IN_APP,
+                Map.of()
+        );
+
+        notificationService.handleNotificationEvent(first);
+        notificationService.handleNotificationEvent(second);
+
+        verify(notificationRepository, times(2)).save(any(Notification.class));
+    }
+
+    @Test
     void handleNotificationEvent_UserNotFound_ThrowsException() {
         TriggerNotificationEvent event = new TriggerNotificationEvent(
                 userId,

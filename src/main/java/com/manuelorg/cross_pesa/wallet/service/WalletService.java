@@ -138,32 +138,35 @@ public class WalletService {
         Wallet updatedWallet = walletRepository.findById(wallet.getId()).orElseThrow();
 
         // 9. Fire the user notification AFTER commit so a listener failure can
-        //    never roll back the credited wallet.
+        //    never roll back the credited wallet. Only register if inside
+        //    a Spring-managed transaction (not active in unit tests).
         UUID topUpTransactionId = savedTransaction.getId();
         String amountCredited = amount + " " + currency;
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                try {
-                    eventPublisher.publishEvent(new TriggerNotificationEvent(
-                            userId,
-                            topUpTransactionId,
-                            "Wallet Top-Up Successful",
-                            "Your wallet has been credited with " + amountCredited + ".",
-                            NotificationType.IN_APP,
-                            java.util.Map.of(
-                                    "transactionId", topUpTransactionId.toString(),
-                                    "reference", reference
-                            )
-                    ));
-                } catch (Exception e) {
-                    log.atError()
-                            .addKeyValue("event", "notification.publish_failed")
-                            .addKeyValue("transactionId", topUpTransactionId)
-                            .log("Failed to publish top-up notification event", e);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    try {
+                        eventPublisher.publishEvent(new TriggerNotificationEvent(
+                                userId,
+                                topUpTransactionId,
+                                "Wallet Top-Up Successful",
+                                "Your wallet has been credited with " + amountCredited + ".",
+                                NotificationType.IN_APP,
+                                java.util.Map.of(
+                                        "transactionId", topUpTransactionId.toString(),
+                                        "reference", reference
+                                )
+                        ));
+                    } catch (Exception e) {
+                        log.atError()
+                                .addKeyValue("event", "notification.publish_failed")
+                                .addKeyValue("transactionId", topUpTransactionId)
+                                .log("Failed to publish top-up notification event", e);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         log.atInfo()
                 .addKeyValue("event", "wallet.credited")

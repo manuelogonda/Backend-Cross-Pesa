@@ -7,7 +7,10 @@ import com.manuelorg.cross_pesa.kycSubmission.dto.KycResponse;
 import com.manuelorg.cross_pesa.kycSubmission.dto.KycSubmissionRequest;
 import com.manuelorg.cross_pesa.kycSubmission.entity.KycSubmission;
 import com.manuelorg.cross_pesa.kycSubmission.repository.KycSubmissionRepository;
+import com.manuelorg.cross_pesa.notification.dto.TriggerNotificationEvent;
+import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -23,7 +26,8 @@ import java.util.stream.Collectors;
 public class KycService {
 
     private final KycSubmissionRepository kycRepository;
-    private final UserRepository userRepository; // To upgrade the user's KYC level
+    private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(readOnly = true)
     public List<KycResponse> getUserSubmissions(UUID userId) {
@@ -65,12 +69,22 @@ public class KycService {
             targetUser.setKycLevel(2); // Bump them to level 2
             userRepository.save(targetUser);
 
+            // Notify user of approval
+            publishKycNotification(targetUser.getId(), submission.getId(), "KYC Approved",
+                    "Your KYC submission has been approved. You now have Level 2 access.",
+                    NotificationType.IN_APP);
+
         } else if (action.equalsIgnoreCase("REJECTED")) {
             if (reason == null || reason.isBlank()) {
                 throw new IllegalArgumentException("Rejection reason is required when action is REJECTED.");
             }
             submission.setStatus("REJECTED");
             submission.setRejectionReason(reason.trim());
+
+            // Notify user of rejection
+            publishKycNotification(submission.getUser().getId(), submission.getId(), "KYC Rejected",
+                    "Your KYC submission was rejected. Reason: " + reason.trim(),
+                    NotificationType.IN_APP);
         } else {
             throw new IllegalArgumentException("Invalid action. Must be APPROVED or REJECTED.");
         }
@@ -98,6 +112,28 @@ public class KycService {
                 .build();
 
         KycSubmission savedSubmission = kycRepository.save(submission);
+
+        // Notify user that submission was received
+        publishKycNotification(user.getId(), savedSubmission.getId(), "KYC Submission Received",
+                "Your KYC submission is under review. We'll notify you once it's processed.",
+                NotificationType.IN_APP);
+
         return KycResponse.fromEntity(savedSubmission);
+    }
+
+    private void publishKycNotification(UUID userId, UUID submissionId, String title, String message, NotificationType type) {
+        try {
+            eventPublisher.publishEvent(new TriggerNotificationEvent(
+                    userId,
+                    submissionId,
+                    title,
+                    message,
+                    type,
+                    java.util.Map.of("submissionId", submissionId.toString())
+            ));
+        } catch (Exception e) {
+            // Log but don't fail the transaction
+            System.err.println("Failed to publish KYC notification: " + e.getMessage());
+        }
     }
 }

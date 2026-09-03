@@ -1,6 +1,8 @@
 package com.manuelorg.cross_pesa.transaction.controller;
 
 import com.manuelorg.cross_pesa.config.WebhookSecurityService;
+import com.manuelorg.cross_pesa.notification.dto.TriggerNotificationEvent;
+import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
 import com.manuelorg.cross_pesa.transaction.enums.TransactionStatus;
 import com.manuelorg.cross_pesa.transaction.repository.TransactionRepository;
@@ -8,14 +10,18 @@ import tools.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @RestController
@@ -26,6 +32,7 @@ public class WebhookController {
     private final TransactionRepository transactionRepository;
     private final WebhookSecurityService webhookSecurityService;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Receives payout status callbacks from the external payment gateway.
@@ -91,9 +98,64 @@ public class WebhookController {
         if (newStatus == TransactionStatus.FAILED) {
             // TODO: write a Reversal Ledger Entry here to refund the user's wallet
             log.error("Payout FAILED for reference {} — reversal entry pending implementation", gatewayReference);
+            publishNotificationAfterCommit(
+                    transaction.getSender().getId(),
+                    transaction.getId(),
+                    "Payout Failed",
+                    "Your payout of " + transaction.getGrossAmount() + " " + transaction.getSourceCurrency()
+                            + " failed and is pending reversal.",
+                    Map.of(
+                            "transactionId", transaction.getId().toString(),
+                            "status", TransactionStatus.FAILED.name(),
+                            "gatewayReference", gatewayReference,
+                            "gatewayStatus", gatewayStatus
+                    )
+            );
+        } else if (newStatus == TransactionStatus.COMPLETED) {
+            publishNotificationAfterCommit(
+                    transaction.getSender().getId(),
+                    transaction.getId(),
+                    "Payout Completed",
+                    "Your payout of " + transaction.getGrossAmount() + " " + transaction.getSourceCurrency()
+                            + " has been completed.",
+                    Map.of(
+                            "transactionId", transaction.getId().toString(),
+                            "status", TransactionStatus.COMPLETED.name(),
+                            "gatewayReference", gatewayReference
+                    )
+            );
         }
         transactionRepository.save(transaction);
 
         return ResponseEntity.ok("State updated successfully");
+    }
+
+    private void publishNotificationAfterCommit(
+            UUID userId,
+            UUID transactionId,
+            String title,
+            String message,
+            Map<String, Object> metadata
+    ) {
+        Runnable publish = () -> eventPublisher.publishEvent(new TriggerNotificationEvent(
+                userId,
+                transactionId,
+                title,
+                message,
+                NotificationType.IN_APP,
+                metadata
+        ));
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish.run();
+                }
+            });
+            return;
+        }
+
+        publish.run();
     }
 }

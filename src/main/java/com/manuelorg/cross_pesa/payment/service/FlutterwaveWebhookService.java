@@ -1,5 +1,7 @@
 package com.manuelorg.cross_pesa.payment.service;
 
+import com.manuelorg.cross_pesa.notification.dto.TriggerNotificationEvent;
+import com.manuelorg.cross_pesa.notification.enums.NotificationType;
 import com.manuelorg.cross_pesa.payment.dto.FlutterwaveWebhookPayload;
 import com.manuelorg.cross_pesa.systemEngine.SystemWalletEngine;
 import com.manuelorg.cross_pesa.transaction.entity.Transaction;
@@ -10,11 +12,16 @@ import com.manuelorg.cross_pesa.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Processes inbound Flutterwave webhook events.
@@ -30,6 +37,7 @@ public class FlutterwaveWebhookService {
     private final TransactionRepository transactionRepository;
     private final WalletService walletService;
     private final SystemWalletEngine systemWalletEngine;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Processes a {@code charge.completed} (or equivalent) webhook event.
@@ -203,6 +211,17 @@ public class FlutterwaveWebhookService {
     private void confirmPayout(Transaction tx) {
         tx.setStatus(TransactionStatus.COMPLETED);
         transactionRepository.save(tx);
+        publishNotificationAfterCommit(
+                tx.getSender().getId(),
+                tx.getId(),
+                "Transfer Completed",
+                "Your transfer of " + tx.getGrossAmount() + " " + tx.getSourceCurrency() + " has been completed.",
+                Map.of(
+                        "transactionId", tx.getId().toString(),
+                        "status", TransactionStatus.COMPLETED.name(),
+                        "payoutReference", tx.getPayoutReference()
+                )
+        );
         log.atInfo()
                 .addKeyValue("event", "payout.confirmed")
                 .addKeyValue("transactionId", tx.getId())
@@ -231,5 +250,46 @@ public class FlutterwaveWebhookService {
         );
         tx.setStatus(TransactionStatus.FAILED);
         transactionRepository.save(tx);
+        publishNotificationAfterCommit(
+                tx.getSender().getId(),
+                tx.getId(),
+                "Transfer Reversed",
+                "Your transfer of " + tx.getGrossAmount() + " " + tx.getSourceCurrency()
+                        + " could not be completed and has been reversed.",
+                Map.of(
+                        "transactionId", tx.getId().toString(),
+                        "status", TransactionStatus.FAILED.name(),
+                        "providerStatus", providerStatus
+                )
+        );
+    }
+
+    private void publishNotificationAfterCommit(
+            UUID userId,
+            UUID transactionId,
+            String title,
+            String message,
+            Map<String, Object> metadata
+    ) {
+        Runnable publish = () -> eventPublisher.publishEvent(new TriggerNotificationEvent(
+                userId,
+                transactionId,
+                title,
+                message,
+                NotificationType.IN_APP,
+                metadata
+        ));
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish.run();
+                }
+            });
+            return;
+        }
+
+        publish.run();
     }
 }

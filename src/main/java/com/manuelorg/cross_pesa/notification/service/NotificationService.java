@@ -34,8 +34,13 @@ public class NotificationService {
     @EventListener
     @Transactional
     public void handleNotificationEvent(TriggerNotificationEvent event) {
-        String idKeySource = (event.transactionId() != null ? event.transactionId().toString() : event.userId().toString())
-                + (event.type() != null ? event.type().name() : "");
+        String idKeySource = String.join("|",
+                event.userId() != null ? event.userId().toString() : "",
+                event.transactionId() != null ? event.transactionId().toString() : "",
+                event.type() != null ? event.type().name() : "",
+                event.title() != null ? event.title() : "",
+                event.message() != null ? event.message() : ""
+        );
         UUID idempotencyKey = UUID.nameUUIDFromBytes(idKeySource.getBytes());
 
         if (notificationRepository.findByIdempotencyKey(idempotencyKey).isPresent()) {
