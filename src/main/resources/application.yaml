@@ -124,7 +124,7 @@ flutterwave:
   redirect-url: http://localhost:5173/wallet/verify-topup
   webhook-secret: ${FLW_WEBHOOK_SECRET}
   # Public URL of the unified Flutterwave webhook; sent as callback_url on transfers.
-  transfer-webhook-url: ${FLW_WEBHOOK_URL}
+  transfer-webhook-url: ${FLW_WEBHOOK_URL:}
 
 # Inbound webhook secrets. If unset, the corresponding webhooks reject all traffic.
 webhook:
